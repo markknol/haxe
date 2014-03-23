@@ -21,8 +21,14 @@
  */
 package haxe.crypto;
 
+/**
+	Allows to encode/make String and bytes using Sha1 (Secure Hash Algorithm 1).
+**/
 class Sha1 {
-
+	/**
+		Sha1-encode the given data `s` and return a new [[haxe.io.Bytes]]
+		with the result.
+	**/
 	public static function encode( s:String ) : String {
 		#if php
 		return untyped __call__("sha1", s);
@@ -33,6 +39,10 @@ class Sha1 {
 		#end
 	}
 
+	/**
+		Decode the Sha1-encoded data `b` and return the data in a 
+		new [[haxe.io.Bytes]].
+	**/
 	public static function make( b : haxe.io.Bytes ) : haxe.io.Bytes {
 		#if php
 		return haxe.io.Bytes.ofData(untyped __call__("sha1", b.getData(), true));

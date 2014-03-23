@@ -22,7 +22,7 @@
 package haxe.crypto;
 
 /**
-	Allows to encode/decode String and bytes using a power of two base dictionnary.
+	Allows to encode/decode String and bytes using a power of two base dictionary.
 **/
 class BaseCode {
 
@@ -41,6 +41,10 @@ class BaseCode {
 		this.nbits = nbits;
 	}
 
+	/**
+		BaseCode-encode the given Bytes `b` and return a new [[haxe.io.Bytes]]
+		with the result.
+	**/
 	public function encodeBytes( b : haxe.io.Bytes ) : haxe.io.Bytes {
 		#if neko
 		return haxe.io.Bytes.ofData( base_encode(b.getData(),base.getData()) );
@@ -78,6 +82,10 @@ class BaseCode {
 		this.tbl = tbl;
 	}
 
+	/**
+		Decode the BaseCode-encoded Bytes `b` and return the data in a
+		new [[haxe.io.Bytes]].
+	**/
 	public function decodeBytes( b : haxe.io.Bytes ) : haxe.io.Bytes {
 		#if neko
 		return haxe.io.Bytes.ofData( base_decode(b.getData(),base.getData()) );
@@ -108,6 +116,10 @@ class BaseCode {
 		#end
 	}
 
+	/**
+		BaseCode-encode the given input `s` as String and return a new 
+		[[haxe.io.Bytes]] with the result.
+	**/
 	public function encodeString( s : String ) {
 		#if neko
 		return neko.NativeString.toString( base_encode(neko.NativeString.ofString(s),base.getData()) );
@@ -116,6 +128,10 @@ class BaseCode {
 		#end
 	}
 
+	/**
+		Decode the BaseCode-encoded input `s` as String and return the data in a
+		new [[haxe.io.Bytes]].
+	**/
 	public function decodeString( s : String ) {
 		#if neko
 		return neko.NativeString.toString( base_decode(neko.NativeString.ofString(s),base.getData()) );
@@ -124,11 +140,19 @@ class BaseCode {
 		#end
 	}
 
+	/**
+		BaseCode-encode the given input `s` and return a new [[haxe.io.Bytes]]
+		with the result.
+	**/
 	public static function encode( s : String, base : String ) {
 		var b = new BaseCode(haxe.io.Bytes.ofString(base));
 		return b.encodeString(s);
 	}
-
+	
+	/**
+		Decode the BaseCode-encoded data in input and return the data in a
+		new [[haxe.io.Bytes]].
+	**/
 	public static function decode( s : String, base : String ) {
 		var b = new BaseCode(haxe.io.Bytes.ofString(base));
 		return b.decodeString(s);

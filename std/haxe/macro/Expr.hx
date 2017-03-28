@@ -1,5 +1,5 @@
 /*
- * Copyright (C)2005-2016 Haxe Foundation
+ * Copyright (C)2005-2017 Haxe Foundation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -22,7 +22,7 @@
 package haxe.macro;
 
 #if (macro && !doc_gen)
-extern enum Position {
+@:coreType abstract Position {
 }
 #else
 /**
@@ -67,7 +67,7 @@ enum Constant {
 	CString( s : String );
 
 	/**
-		Represents an indentifier.
+		Represents an identifier.
 	**/
 	CIdent( s : String );
 
@@ -297,17 +297,17 @@ typedef Var = {
 	/**
 		The name of the variable.
 	**/
-	name : String,
+	var name : String;
 
 	/**
 		The type-hint of the variable, if available.
 	**/
-	type : Null<ComplexType>,
+	var type : Null<ComplexType>;
 
 	/**
 		The expression of the variable, if available.
 	**/
-	expr : Null<Expr>
+	var expr : Null<Expr>;
 }
 
 /**
@@ -318,17 +318,17 @@ typedef Catch = {
 	/**
 		The name of the catch variable.
 	**/
-	name : String,
+	var name : String;
 
 	/**
 		The type of the catch.
 	**/
-	type : ComplexType,
+	var type : ComplexType;
 
 	/**
 		The expression of the catch.
 	**/
-	expr : Expr
+	var expr : Expr;
 }
 
 /**
@@ -669,17 +669,17 @@ typedef MetadataEntry = {
 	/**
 		The name of the metadata entry.
 	**/
-	name : String,
+	var name : String;
 
 	/**
 		The optional parameters of the metadata entry.
 	**/
-	?params : Array<Expr>,
+	@:optional var params : Array<Expr>;
 
 	/**
 		The position of the metadata entry.
 	**/
-	pos : Position
+	var pos : Position;
 }
 
 /**
@@ -819,7 +819,7 @@ typedef TypeDefinition = {
 	@:optional var meta : Metadata;
 
 	/**
-		The paramater type declarations of the type definition.
+		The parameter type declarations of the type definition.
 	**/
 	@:optional var params : Array<TypeParamDecl>;
 

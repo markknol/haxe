@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -604,6 +604,53 @@ let rename_local_vars ctx e =
 	List.iter maybe_rename (List.rev !vars);
 	e
 
+let mark_switch_break_loops e =
+	let add_loop_label n e =
+		{ e with eexpr = TMeta ((Meta.LoopLabel,[(EConst(Int(string_of_int n)),e.epos)],e.epos), e) }
+	in
+	let in_switch = ref false in
+	let did_found = ref (-1) in
+	let num = ref 0 in
+	let cur_num = ref 0 in
+	let rec run e =
+		match e.eexpr with
+		| TFunction _ ->
+			let old_num = !num in
+			num := 0;
+				let ret = Type.map_expr run e in
+			num := old_num;
+			ret
+		| TWhile _ | TFor _ ->
+			let last_switch = !in_switch in
+			let last_found = !did_found in
+			let last_num = !cur_num in
+			in_switch := false;
+			incr num;
+			cur_num := !num;
+			did_found := -1;
+				let new_e = Type.map_expr run e in (* assuming that no loop will be found in the condition *)
+				let new_e = if !did_found <> -1 then add_loop_label !did_found new_e else new_e in
+			did_found := last_found;
+			in_switch := last_switch;
+			cur_num := last_num;
+
+			new_e
+		| TSwitch _ ->
+			let last_switch = !in_switch in
+			in_switch := true;
+				let new_e = Type.map_expr run e in
+			in_switch := last_switch;
+			new_e
+		| TBreak ->
+			if !in_switch then (
+				did_found := !cur_num;
+				add_loop_label !cur_num e
+			) else
+				e
+		| _ -> Type.map_expr run e
+	in
+	run e
+
 let check_unification ctx e t =
 	begin match e.eexpr,t with
 		| TLocal v,TType({t_path = ["cs"],("Ref" | "Out")},_) ->
@@ -776,10 +823,6 @@ let apply_native_paths ctx t =
 			let meta,path = get_real_path e.e_meta e.e_path in
 			e.e_meta <- meta :: e.e_meta;
 			e.e_path <- path;
-		| TAbstractDecl a ->
-			let meta,path = get_real_path a.a_meta a.a_path in
-			a.a_meta <- meta :: a.a_meta;
-			a.a_path <- path;
 		| _ ->
 			())
 	with Not_found ->
@@ -897,26 +940,25 @@ let add_meta_field ctx t = match t with
 		| None -> ()
 		| Some e ->
 			add_feature ctx.com "has_metadata";
-			let f = mk_field "__meta__" t_dynamic c.cl_pos null_pos in
-			f.cf_expr <- Some e;
+			let cf = mk_field "__meta__" e.etype e.epos null_pos in
+			cf.cf_expr <- Some e;
 			let can_deal_with_interface_metadata () = match ctx.com.platform with
 				| Flash when Common.defined ctx.com Define.As3 -> false
-				| Php -> false
+				| Php when not (Common.is_php7 ctx.com) -> false
+				| Cs | Java -> false
 				| _ -> true
 			in
 			if c.cl_interface && not (can_deal_with_interface_metadata()) then begin
 				(* borrowed from gencommon, but I did wash my hands afterwards *)
 				let path = fst c.cl_path,snd c.cl_path ^ "_HxMeta" in
 				let ncls = mk_class c.cl_module path c.cl_pos null_pos in
-				let cf = mk_field "__meta__" e.etype e.epos null_pos in
-				cf.cf_expr <- Some e;
-				ncls.cl_statics <- PMap.add "__meta__" cf ncls.cl_statics;
 				ncls.cl_ordered_statics <- cf :: ncls.cl_ordered_statics;
-				ctx.com.types <- (TClassDecl ncls) :: ctx.com.types;
+				ncls.cl_statics <- PMap.add cf.cf_name cf ncls.cl_statics;
+				ctx.com.types <- ctx.com.types @ [ TClassDecl ncls ];
 				c.cl_meta <- (Meta.Custom ":hasMetadata",[],e.epos) :: c.cl_meta
 			end else begin
-				c.cl_ordered_statics <- f :: c.cl_ordered_statics;
-				c.cl_statics <- PMap.add f.cf_name f c.cl_statics
+				c.cl_ordered_statics <- cf :: c.cl_ordered_statics;
+				c.cl_statics <- PMap.add cf.cf_name cf c.cl_statics
 			end)
 	| _ ->
 		()
@@ -1087,17 +1129,47 @@ let run com tctx main =
 		Optimizer.reduce_expression tctx;
 		captured_vars com;
 	] in
+	let filters =
+		match com.platform with
+		| Cs ->
+			SetHXGen.run_filter com new_types;
+			filters @ [
+				TryCatchWrapper.configure_cs com
+			]
+		| Java ->
+			SetHXGen.run_filter com new_types;
+			filters @ [
+				TryCatchWrapper.configure_java com
+			]
+		| _ -> filters
+	in
 	List.iter (run_expression_filters tctx filters) new_types;
+
 	(* PASS 1.5: pre-analyzer type filters *)
-	List.iter (fun t ->
-		if com.platform = Cs then check_cs_events tctx.com t;
-	) new_types;
+	let filters =
+		match com.platform with
+		| Cs ->
+			[
+				check_cs_events tctx.com;
+				DefaultArguments.run com;
+			]
+		| Java ->
+			[
+				DefaultArguments.run com;
+			]
+		| _ ->
+			[]
+	in
+	List.iter (fun f -> List.iter f new_types) filters;
+
 	if com.platform <> Cross then Analyzer.Run.run_on_types tctx new_types;
+
 	let filters = [
 		Optimizer.sanitize com;
 		if com.config.pf_add_final_return then add_final_return else (fun e -> e);
 		if com.platform = Js then wrap_js_exceptions com else (fun e -> e);
 		rename_local_vars tctx;
+		mark_switch_break_loops;
 	] in
 	List.iter (run_expression_filters tctx filters) new_types;
 	next_compilation();
@@ -1129,10 +1201,14 @@ let run com tctx main =
 		apply_native_paths;
 		add_rtti;
 		(match com.platform with | Java | Cs -> (fun _ _ -> ()) | _ -> add_field_inits);
-		add_meta_field;
+		(match com.platform with Hl -> (fun _ _ -> ()) | _ -> add_meta_field);
 		check_void_field;
 		(match com.platform with | Cpp -> promote_first_interface_to_super | _ -> (fun _ _ -> ()) );
 		commit_features;
 		(if com.config.pf_reserved_type_paths <> [] then check_reserved_type_paths else (fun _ _ -> ()));
 	] in
+	let type_filters = match com.platform with
+		| Cs -> type_filters @ [ fun _ t -> InterfaceProps.run t ]
+		| _ -> type_filters
+	in
 	List.iter (fun t -> List.iter (fun f -> f tctx t) type_filters) com.types

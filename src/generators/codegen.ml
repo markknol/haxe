@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -32,9 +32,22 @@ module ExprBuilder = struct
 		let ta = TAnon { a_fields = c.cl_statics; a_status = ref (Statics c) } in
 		mk (TTypeExpr (TClassDecl c)) ta p
 
+	let make_typeexpr mt pos =
+		let t =
+			match mt with
+			| TClassDecl c -> TAnon { a_fields = c.cl_statics; a_status = ref (Statics c) }
+			| TEnumDecl e -> TAnon { a_fields = PMap.empty; a_status = ref (EnumStatics e) }
+			| TAbstractDecl a -> TAnon { a_fields = PMap.empty; a_status = ref (AbstractStatics a) }
+			| _ -> assert false
+		in
+		mk (TTypeExpr mt) t pos
+
 	let make_static_field c cf p =
 		let e_this = make_static_this c p in
 		mk (TField(e_this,FStatic(c,cf))) cf.cf_type p
+
+	let make_throw e p =
+		mk (TThrow e) t_dynamic p
 
 	let make_int com i p =
 		mk (TConst (TInt (Int32.of_int i))) com.basic.tint p
@@ -72,6 +85,9 @@ let fcall e name el ret p =
 
 let mk_parent e =
 	mk (TParenthesis e) e.etype e.epos
+
+let mk_return e =
+	mk (TReturn (Some e)) t_dynamic e.epos
 
 let binop op a b t p =
 	mk (TBinop (op,a,b)) t p
@@ -365,7 +381,7 @@ let rec find_field com c f =
 		| Some (c,_) ->
 			find_field com c f)
 	with Not_found -> try
-		if com.platform = Cpp then (* Cpp uses delegation for interfaces *)
+		if com.platform = Cpp || com.platform = Hl then (* uses delegation for interfaces *)
 			raise Not_found;
 		let rec loop = function
 			| [] ->
@@ -531,6 +547,8 @@ module Dump = struct
 		| [] -> assert false
 		| d :: [] ->
 			let d = make_valid_filename d in
+			let maxlen = 200 - String.length ext in
+			let d = if String.length d > maxlen then String.sub d 0 maxlen else d in
 			let ch = open_out (String.concat "/" (List.rev (d :: acc)) ^ ext) in
 			ch
 		| d :: l ->
@@ -870,3 +888,18 @@ module ExtClass = struct
 		let e_assign = mk (TBinop(OpAssign,ef1,e)) e.etype p in
 		add_cl_init c e_assign
 end
+
+let for_remap com v e1 e2 p =
+	let v' = alloc_var v.v_name e1.etype e1.epos in
+	let ev' = mk (TLocal v') e1.etype e1.epos in
+	let t1 = (Abstract.follow_with_abstracts e1.etype) in
+	let ehasnext = mk (TField(ev',quick_field t1 "hasNext")) (tfun [] com.basic.tbool) e1.epos in
+	let ehasnext = mk (TCall(ehasnext,[])) com.basic.tbool ehasnext.epos in
+	let enext = mk (TField(ev',quick_field t1 "next")) (tfun [] v.v_type) e1.epos in
+	let enext = mk (TCall(enext,[])) v.v_type e1.epos in
+	let eassign = mk (TVar(v,Some enext)) com.basic.tvoid p in
+	let ebody = Type.concat eassign e2 in
+	mk (TBlock [
+		mk (TVar (v',Some e1)) com.basic.tvoid e1.epos;
+		mk (TWhile((mk (TParenthesis ehasnext) ehasnext.etype ehasnext.epos),ebody,NormalWhile)) com.basic.tvoid e1.epos;
+	]) com.basic.tvoid p

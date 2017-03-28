@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -672,7 +672,7 @@ module Useless = struct
 						let patterns1 = ExtList.List.make arity (PatAny,p) in
 						loop ((patterns1 @ patterns2) :: pAcc) (q1 :: qAcc) (r1 :: rAcc) pM qM rM
 					| ((PatOr(pat1,pat2)),_) :: patterns2 ->
-						specialize' is_tuple con (((pat1 :: patterns2) :: (pat2 :: patterns2) :: pAcc)) (q1 :: q1 :: qM @ qAcc) (r1 :: r1 :: rM @ rAcc)
+						loop pAcc qAcc rAcc (((pat1 :: patterns2) :: (pat2 :: patterns2) :: pM)) (q1 :: q1 :: qM) (r1 :: r1 :: rM)
 					| (PatBind(_,pat1),_) :: patterns2 ->
 						loop2 (pat1 :: patterns2)
 					| _ ->
@@ -1339,7 +1339,7 @@ module TexprConverter = struct
 				let e_then = loop false params dt1 in
 				begin try
 					let e_else = loop false params dt2 in
-					mk (TIf(e,e_then,Some e_else)) e_then.etype (punion e_then.epos e_else.epos)
+					mk (TIf(e,e_then,Some e_else)) t_switch (punion e_then.epos e_else.epos)
 				with Not_exhaustive when with_type = NoValue ->
 					mk (TIf(e,e_then,None)) ctx.t.tvoid (punion e.epos e_then.epos)
 				end
@@ -1350,7 +1350,7 @@ module TexprConverter = struct
 					(fun () ->
 						let e_else = loop false params dt2 in
 						let e_op = mk (TBinop(OpEq,e,e_null)) ctx.t.tbool e.epos in
-						mk (TIf(e_op,e_then,Some e_else)) e_then.etype (punion e_then.epos e_else.epos)
+						mk (TIf(e_op,e_then,Some e_else)) t_switch (punion e_then.epos e_else.epos)
 					)
 				with Not_exhaustive ->
 					if toplevel then (fun () -> loop false params dt2)

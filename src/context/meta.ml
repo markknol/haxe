@@ -85,6 +85,7 @@ type strict_meta =
 	| KeepInit
 	| KeepSub
 	| LibType
+	| LoopLabel
 	| LuaRequire
 	| Meta
 	| Macro
@@ -117,6 +118,9 @@ type strict_meta =
 	| Overload
 	| PhpConstants
 	| PhpGlobal
+	| PhpClassConst
+	| PhpMagic
+	| PhpNoConstructor
 	| PrivateAccess
 	| Property
 	| Protected
@@ -277,6 +281,7 @@ let get_info = function
 	| KeepInit -> ":keepInit",("Causes a class to be kept by DCE even if all its field are removed",[UsedOn TClass])
 	| KeepSub -> ":keepSub",("Extends @:keep metadata to all implementing and extending classes",[UsedOn TClass])
 	| LibType -> ":libType",("Used by -net-lib and -java-lib to mark a class that shouldn't be checked (overrides, interfaces, etc) by the type loader",[UsedInternally; UsedOn TClass; Platforms [Java;Cs]])
+	| LoopLabel -> ":loopLabel",("Mark loop and break expressions with a label to support breaking from within switch",[UsedInternally])
 	| Meta -> ":meta",("Internally used to mark a class field as being the metadata field",[])
 	| Macro -> ":macro",("(deprecated)",[])
 	| MaybeUsed -> ":maybeUsed",("Internally used by DCE to mark fields that might be kept",[UsedInternally])
@@ -307,7 +312,10 @@ let get_info = function
 	| Optional -> ":optional",("Marks the field of a structure as optional",[UsedOn TClassField])
 	| Overload -> ":overload",("Allows the field to be called with different argument types",[HasParam "Function specification (no expression)";UsedOn TClassField])
 	| PhpConstants -> ":phpConstants",("Marks the static fields of a class as PHP constants, without $",[Platform Php;UsedOn TClass])
-	| PhpGlobal -> ":phpGlobal",("Puts the static fields of a class in the global PHP namespace",[Platform Php;UsedOn TClass])
+	| PhpGlobal -> ":phpGlobal",("(php7) Puts the static fields of a class in the global PHP namespace",[Platforms [Php;Php];UsedOn TClass])
+	| PhpClassConst -> ":phpClassConst",("(php7)  Generate static var of an extern class as a PHP class constant",[Platform Php;UsedOn TClass])
+	| PhpMagic -> ":phpMagic",("(php7) Treat annotated field as special PHP magic field",[Platform Php;UsedOn TClassField])
+	| PhpNoConstructor -> ":phpNoConstructor",("(php7) Special meta for extern classes which does not have native constructor in PHP, but need a constructor in Haxe extern",[Platform Php;UsedOn TClass])
 	| Public -> ":public",("Marks a class field as being public",[UsedOn TClassField;UsedInternally])
 	| PublicFields -> ":publicFields",("Forces all class fields of inheriting classes to be public",[UsedOn TClass])
 	| QuotedField -> ":quotedField",("Used internally to mark structure fields which are quoted in syntax",[UsedInternally])

@@ -27,7 +27,7 @@ exception Diagnostics of string
 exception Statistics of string
 exception ModuleSymbols of string
 exception Metadata of string
-exception DisplaySignatures of (t * documentation) list * int
+exception DisplaySignatures of (tsignature * documentation) list * int
 exception DisplayType of t * pos * string option
 exception DisplayPosition of pos list
 exception DisplayFields of (string * display_field_kind * documentation) list
@@ -174,6 +174,9 @@ module DisplayEmitter = struct
 		| DMUsage _ -> cf.cf_meta <- (Meta.Usage,[],cf.cf_pos) :: cf.cf_meta;
 		| DMType -> raise (DisplayType (cf.cf_type,p,cf.cf_doc))
 		| _ -> ()
+
+	let maybe_display_field ctx p cf =
+		if is_display_position p then display_field ctx.com.display cf p
 
 	let display_enum_field dm ef p = match dm.dms_kind with
 		| DMPosition -> raise (DisplayPosition [p]);
@@ -847,6 +850,11 @@ module ToplevelCollector = struct
 				with Not_found ->
 					()
 			) ctx.m.module_globals;
+
+			(* literals *)
+			DynArray.add acc (ITLiteral "null");
+			DynArray.add acc (ITLiteral "true");
+			DynArray.add acc (ITLiteral "false");
 		end;
 
 		let module_types = ref [] in

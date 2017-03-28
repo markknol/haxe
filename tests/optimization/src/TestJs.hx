@@ -4,9 +4,9 @@ private enum Tree<T> {
 }
 
 private enum Some {
-    one(s1:String);
-    pair(s1:String, s2:String);
-    triad(s1:String, s2:String, s3:String);
+	one(s1:String);
+	pair(s1:String, s2:String);
+	triad(s1:String, s2:String, s3:String);
 }
 
 class Inl{
@@ -22,7 +22,6 @@ private enum EnumFlagTest {
 	EC;
 }
 
-@:analyzer(code_motion)
 @:analyzer(no_user_var_fusion)
 class TestJs {
 	//@:js('var x = 10;"" + x;var x1 = 10;"" + x1;var x2 = 10.0;"" + x2;var x3 = "10";x3;var x4 = true;"" + x4;')
@@ -123,7 +122,7 @@ class TestJs {
 	static inline function verify(s1) return s1 == "foo";
 
 	@:js('
-		var object = { \'hello\' : "world"};
+		var object = { "hello" : "world"};
 		TestJs["use"](object);
 	')
 	static function testQuotedStructureFields1() {
@@ -134,7 +133,7 @@ class TestJs {
 	}
 
 	@:js('
-		var object = { \'hello\' : "world", world : "hello", \'another\' : "quote"};
+		var object = { "hello" : "world", world : "hello", "another" : "quote"};
 		TestJs["use"](object);
 	')
 	static function testQuotedStructureFields2() {
@@ -142,6 +141,17 @@ class TestJs {
 			'hello': "world",
 			world: "hello",
 			"another": "quote"
+		}
+		use(object);
+	}
+
+	@:js('
+		var object = { "\'" : "world"};
+		TestJs["use"](object);
+	')
+	static function testQuotedStructureFields3() {
+		var object = {
+			"'": "world",
 		}
 		use(object);
 	}
@@ -233,8 +243,8 @@ class TestJs {
 		TestJs["use"](2);
 	')
 	static function testIssue4731() {
-        var map = new Map();
-        var i = map["some"] = 2;
+		var map = new Map();
+		var i = map["some"] = 2;
 		use(i);
 	}
 
@@ -302,111 +312,6 @@ class TestJs {
 
 		use(a);
 		use(b);
-	}
-
-	@:js('
-		var a = TestJs.getInt();
-		var b = TestJs.getInt();
-		var x;
-		var tmp = a + b;
-		while(a != b) {
-			x = tmp;
-			TestJs["use"](x);
-		}
-	')
-	static function testCodeMotion1() {
-		var a = getInt();
-		var b = getInt();
-		var x;
-		while (a != b) {
-			x = a + b;
-			use(x);
-		}
-	}
-
-	@:js('
-		var a = TestJs.getInt();
-		var b = TestJs.getInt();
-		var x = 0;
-		while(a != b) {
-			x = a + x;
-			TestJs["use"](x);
-		}
-	')
-	static function testCodeMotion2() {
-		var a = getInt();
-		var b = getInt();
-		var x = 0;
-		while (a != b) {
-			x = a + x;
-			use(x);
-		}
-	}
-
-	@:js('
-		var a = TestJs.getInt();
-		var b = TestJs.getInt();
-		var x;
-		while(a != b) {
-			var tmp = a + b;
-			while(a != b) {
-				x = tmp;
-				TestJs["use"](x);
-			}
-		}
-	')
-	static function testCodeMotion3() {
-		var a = getInt();
-		var b = getInt();
-		var x;
-		while (a != b) {
-			while (a != b) {
-				x = a + b;
-				use(x);
-			}
-		}
-	}
-
-	@:js('
-		var a = TestJs.getInt();
-		var b = TestJs.getInt();
-		var x;
-		var tmp = a + b + b;
-		while(a != b) {
-			x = tmp;
-			TestJs["use"](x);
-		}
-	')
-	static function testCodeMotion4() {
-		var a = getInt();
-		var b = getInt();
-		var x;
-		while (a != b) {
-			x = a + b + b;
-			use(x);
-		}
-	}
-
-	@:js('
-		var a = TestJs.getInt();
-		var b = TestJs.getInt();
-		var x;
-		var tmp = a + b;
-		while(a != b) {
-			x = tmp;
-			TestJs["use"](x);
-			TestJs["use"](x);
-		}
-	')
-	static function testCodeMotion5() {
-		var a = getInt();
-		var b = getInt();
-		var x;
-		while (a != b) {
-			x = a + b;
-			use(x);
-			use(x);
-		}
 	}
 
 	@:js('
@@ -584,8 +489,42 @@ class TestJs {
 		TestJs["use"](v);
 	')
 	static function testIssue4745() {
-        var o = "";
-        var v = Type.typeof(o).match(TClass(String));
-        use(v);
+		var o = "";
+		var v = Type.typeof(o).match(TClass(String));
+		use(v);
 	}
+
+	@:js('
+		var e = { };
+		e["a"] = 30;
+		console.log(e);
+	')
+	@:analyzer(user_var_fusion)
+	static function testIssue4948() {
+		var e = new haxe.DynamicAccess();
+		e["a"] = 30;
+		trace(e);
+	}
+
+
+	@:js('
+		var tmp = "foo";
+		Extern.test(tmp);
+		var tmp1 = "bar";
+		Extern.test(tmp1);
+		var closure = Extern.test;
+		var tmp2 = "baz";
+		closure(tmp2);
+	')
+	static function testAsVar() {
+		Extern.test("foo");
+		var x = "bar";
+		Extern.test(x);
+		var closure = Extern.test;
+		closure("baz");
+	}
+}
+
+extern class Extern {
+	static public function test(e:haxe.extern.AsVar<String>):Void;
 }

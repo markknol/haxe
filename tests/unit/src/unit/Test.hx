@@ -71,7 +71,7 @@ class Test {
 		incrCount(pos);
 		try {
 			f();
-			report("No exception occured",pos);
+			report("No exception occurred",pos);
 			success = false;
 		} catch( e : Dynamic ) {
 		}
@@ -169,7 +169,7 @@ class Test {
 		f(args,function(v) {
 			incrCount(pos);
 			if( asyncWaits.remove(pos) ) {
-				report("No exception occured",pos);
+				report("No exception occurred",pos);
 				success = false;
 				checkDone();
 			} else {
@@ -272,5 +272,8 @@ class Test {
 		success = false;
 		reportInfos = null;
 		trace("STACK :\n"+stack);
+#if lua
+		Sys.exit(1);
+#end
 	}
 }

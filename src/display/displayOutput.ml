@@ -78,6 +78,8 @@ let print_toplevel il =
 			Buffer.add_string b (Printf.sprintf "<i k=\"type\" p=\"%s\"%s>%s</i>\n" (s_type_path infos.mt_path) (s_doc infos.mt_doc) (snd infos.mt_path));
 		| IdentifierType.ITPackage s ->
 			Buffer.add_string b (Printf.sprintf "<i k=\"package\">%s</i>\n" s)
+		| IdentifierType.ITLiteral s ->
+			Buffer.add_string b (Printf.sprintf "<i k=\"literal\">%s</i>\n" s)
 		| IdentifierType.ITTimer s ->
 			Buffer.add_string b (Printf.sprintf "<i k=\"timer\">%s</i>\n" s)
 	) il;
@@ -101,11 +103,11 @@ let print_type t p doc =
 
 let print_signatures tl =
 	let b = Buffer.create 0 in
-	List.iter (fun (t,doc) ->
+	List.iter (fun ((args,ret),doc) ->
 		Buffer.add_string b "<type";
 		Option.may (fun s -> Buffer.add_string b (Printf.sprintf " d=\"%s\"" (htmlescape s))) doc;
 		Buffer.add_string b ">\n";
-		Buffer.add_string b (htmlescape (s_type (print_context()) (follow t)));
+		Buffer.add_string b (htmlescape (s_type (print_context()) (TFun(args,ret))));
 		Buffer.add_string b "\n</type>\n";
 	) tl;
 	Buffer.contents b
@@ -245,6 +247,7 @@ module TypePathHandler = struct
 			| x :: l ->
 				(try
 					match PMap.find x com.package_rules with
+					| Directory d -> d :: l
 					| Remap s -> s :: l
 					| _ -> p
 				with
@@ -265,6 +268,7 @@ module TypePathHandler = struct
 									match PMap.find f com.package_rules with
 									| Forbidden -> ()
 									| Remap f -> packages := f :: !packages
+									| Directory _ -> raise Not_found
 								with Not_found ->
 									packages := f :: !packages
 						else
@@ -405,17 +409,15 @@ let print_signature tl display_arg =
 	let st = s_type (print_context()) in
 	let s_arg (n,o,t) = Printf.sprintf "%s%s:%s" (if o then "?" else "") n (st t) in
 	let s_fun args ret = Printf.sprintf "(%s):%s" (String.concat ", " (List.map s_arg args)) (st ret) in
-	let siginf = List.map (fun (t,doc) ->
-		let label = match follow t with TFun(args,ret) -> s_fun args ret | _ -> st t in
-		let parameters = match follow t with
-			| TFun(args,_) ->
-				List.map (fun arg ->
+	let siginf = List.map (fun ((args,ret),doc) ->
+		let label = s_fun args ret in
+		let parameters =
+			List.map (fun arg ->
 					let label = s_arg arg in
 					JObject [
 						"label",JString label
 					]
-				) args
-			| _ -> []
+			) args
 		in
 		let js = [
 			"label",JString label;

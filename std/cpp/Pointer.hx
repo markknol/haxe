@@ -1,5 +1,5 @@
 /*
- * Copyright (C)2005-2016 Haxe Foundation
+ * Copyright (C)2005-2017 Haxe Foundation
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -21,7 +21,10 @@
  */
  package cpp;
 
+import haxe.extern.AsVar;
+
 @:coreType
+@:analyzer(as_var)
 extern class Pointer<T> extends ConstPointer<T> implements ArrayAccess<T>
 {
    public var ref(get,set):Reference<T>;
@@ -42,7 +45,7 @@ extern class Pointer<T> extends ConstPointer<T> implements ArrayAccess<T>
 
    public static function fromPointer<T>(inNativePointer:Dynamic) : Pointer<T>;
 
-   public static function addressOf<T>(inVariable:T) : Pointer<T>;
+   public static function addressOf<T>(inVariable:cpp.Reference<T>) : Pointer<T>;
 
    public static function endOf<T:{}>(inVariable:T) : Pointer<cpp.Void>;
 
@@ -69,7 +72,7 @@ extern class Pointer<T> extends ConstPointer<T> implements ArrayAccess<T>
 
    inline public function toUnmanagedVector(elementCount:Int) : haxe.ds.Vector<T>
       return cast toUnmanagedArray(elementCount);
- 
+
 
    override public function inc():Pointer<T>;
    override public function dec():Pointer<T>;

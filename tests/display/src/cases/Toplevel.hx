@@ -135,7 +135,16 @@ class Toplevel extends DisplayTestCase {
 		eq(true, hasToplevel(typesCompletion, "package", "haxe"));
 	}
 
-	static function hasToplevel(a:Array<ToplevelElement>, kind:String, name:String):Bool {
+	/**
+	Xml.parse({-1-}
+	**/
+	@:funcCode function testIssue5969() {
+		var typesCompletion = toplevel(pos(1));
+		eq(true, hasToplevel(typesCompletion, "type", "Array"));
+		eq(true, hasToplevel(typesCompletion, "package", "haxe"));
+	}
+
+	public static function hasToplevel(a:Array<ToplevelElement>, kind:String, name:String):Bool {
 		return a.exists(function(t) return t.kind == kind && t.name == name);
 	}
 }

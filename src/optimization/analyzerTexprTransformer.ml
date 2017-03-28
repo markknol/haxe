@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -205,7 +205,7 @@ let rec func ctx bb tf t p =
 			bb,(value :: acc)
 		) (bb,[]) el in
 		bb,List.rev values
-	and bind_to_temp bb sequential e =
+	and bind_to_temp ?(v=None) bb sequential e =
 		let is_probably_not_affected e e1 fa = match fa with
 			| FAnon cf | FInstance (_,_,cf) | FStatic (_,cf) | FClosure (_,cf) when cf.cf_kind = Method MethNormal -> true
 			| FStatic(_,{cf_kind = Method MethDynamic}) -> false
@@ -236,16 +236,17 @@ let rec func ctx bb tf t p =
 				| s :: _ -> s
 				| [] -> ctx.temp_var_name
 		in
-		let v = alloc_var (loop e) e.etype e.epos in
+		let v = match v with Some v -> v | None -> alloc_var (loop e) e.etype e.epos in
 		begin match ctx.com.platform with
 			| Globals.Cpp when sequential && not (Common.defined ctx.com Define.Cppia) -> ()
 			| _ -> v.v_meta <- [Meta.CompilerGenerated,[],e.epos];
 		end;
 		let bb = declare_var_and_assign bb v e e.epos in
 		let e = {e with eexpr = TLocal v} in
-		let e = List.fold_left (fun e f -> f e) e (List.rev fl) in
+		let e = List.fold_left (fun e f -> f e) e fl in
 		bb,e
 	and declare_var_and_assign bb v e p =
+		(* TODO: this section shouldn't be here because it can be handled as part of the normal value processing *)
 		let rec loop bb e = match e.eexpr with
 			| TParenthesis e1 ->
 				loop bb e1
@@ -255,6 +256,7 @@ let rec func ctx bb tf t p =
 						bb,e
 					| e1 :: el ->
 						let bb = block_element bb e1 in
+						if bb == g.g_unreachable then raise Exit;
 						loop2 bb el
 					| [] ->
 						assert false
@@ -264,27 +266,33 @@ let rec func ctx bb tf t p =
 			| _ ->
 				bb,e
 		in
-		let bb,e = loop bb e in
-		no_void v.v_type p;
-		let ev = mk (TLocal v) v.v_type p in
-		let was_assigned = ref false in
-		let assign e =
-			if not !was_assigned then begin
-				was_assigned := true;
-				add_texpr bb (mk (TVar(v,None)) ctx.com.basic.tvoid ev.epos);
-			end;
-			mk (TBinop(OpAssign,ev,e)) ev.etype ev.epos
-		in
-		let close = push_name v.v_name in
-		let bb = try
-			block_element_plus bb (map_values assign e) (fun e -> mk (TVar(v,Some e)) ctx.com.basic.tvoid ev.epos)
-		with Exit ->
-			let bb,e = value bb e in
-			add_texpr bb (mk (TVar(v,Some e)) ctx.com.basic.tvoid ev.epos);
+		let generate bb e =
+			no_void v.v_type p;
+			let ev = mk (TLocal v) v.v_type p in
+			let was_assigned = ref false in
+			let assign e =
+				if not !was_assigned then begin
+					was_assigned := true;
+					add_texpr bb (mk (TVar(v,None)) ctx.com.basic.tvoid ev.epos);
+				end;
+				mk (TBinop(OpAssign,ev,e)) ev.etype ev.epos
+			in
+			let close = push_name v.v_name in
+			let bb = try
+				block_element_plus bb (map_values assign e) (fun e -> mk (TVar(v,Some e)) ctx.com.basic.tvoid ev.epos)
+			with Exit ->
+				let bb,e = value bb e in
+				add_texpr bb (mk (TVar(v,Some e)) ctx.com.basic.tvoid ev.epos);
+				bb
+			in
+			close();
 			bb
 		in
-		close();
-		bb
+		try
+			let bb,e = loop bb e in
+			generate bb e
+		with Exit ->
+			g.g_unreachable
 	and block_element_plus bb (e,efinal) f =
 		let bb = block_element bb e in
 		let bb = match efinal with
@@ -296,18 +304,25 @@ let rec func ctx bb tf t p =
 		let e,efinal = map_values f e in
 		block_element_plus bb (e,efinal) f
 	and call bb e e1 el =
+		let bb = ref bb in
 		let check e t = match e.eexpr with
 			| TLocal v when is_ref_type t ->
 				v.v_capture <- true;
 				e
 			| _ ->
-				e
+				if is_asvar_type t then begin
+					let v = alloc_var "tmp" t e.epos in
+					let bb',e = bind_to_temp ~v:(Some v) !bb false e in
+					bb := bb';
+					e
+				end else
+					e
 		in
 		let el = Codegen.UnificationCallback.check_call check el e1.etype in
-			let bb,el = ordered_value_list bb (e1 :: el) in
-			match el with
-				| e1 :: el -> bb,{e with eexpr = TCall(e1,el)}
-				| _ -> assert false
+		let bb,el = ordered_value_list !bb (e1 :: el) in
+		match el with
+			| e1 :: el -> bb,{e with eexpr = TCall(e1,el)}
+			| _ -> assert false
 	and array_assign_op bb op e ea e1 e2 e3 =
 		let bb,e1 = bind_to_temp bb false e1 in
 		let bb,e2 = bind_to_temp bb false e2 in
@@ -318,7 +333,10 @@ let rec func ctx bb tf t p =
 		add_texpr bb {e with eexpr = TBinop(OpAssign,ea,eop)};
 		bb,ea
 	and field_assign_op bb op e ef e1 fa e2 =
-		let bb,e1 = bind_to_temp bb false e1 in
+		let bb,e1 = match fa with
+			| FInstance(c,_,_) | FClosure(Some(c,_),_) when is_stack_allocated c -> bb,e1
+			| _ -> bind_to_temp bb false e1
+		in
 		let ef = {ef with eexpr = TField(e1,fa)} in
 		let bb,e3 = bind_to_temp bb false ef in
 		let bb,e2 = bind_to_temp bb false e2 in
@@ -473,37 +491,25 @@ let rec func ctx bb tf t p =
 			let close = begin_try bb_exc in
 			let bb_try_next = block bb_try e1 in
 			close();
-			let bb_next = if bb_exc.bb_incoming = [] then
-				let bb_next = if bb_try_next == g.g_unreachable then
-					g.g_unreachable
-				else begin
-					let bb_next = create_node BKNormal bb.bb_type bb.bb_pos in
-					add_cfg_edge bb_try_next bb_next CFGGoto;
-					close_node g bb_try_next;
-					bb_next
-				end in
-				set_syntax_edge bb (SESubBlock(bb_try,bb_next));
-				bb_next
-			else begin
-				let is_reachable = ref (not (bb_try_next == g.g_unreachable)) in
-				let catches = List.map (fun (v,e) ->
-					let bb_catch = create_node (BKCatch v) e.etype e.epos in
-					add_cfg_edge bb_exc bb_catch CFGGoto;
-					let bb_catch_next = block bb_catch e in
-					is_reachable := !is_reachable || (not (bb_catch_next == g.g_unreachable));
-					v,bb_catch,bb_catch_next
-				) catches in
-				let bb_next = if !is_reachable then create_node BKNormal bb.bb_type bb.bb_pos else g.g_unreachable in
-				let catches = List.map (fun (v,bb_catch,bb_catch_next) ->
-					if bb_catch_next != g.g_unreachable then add_cfg_edge bb_catch_next bb_next CFGGoto;
-					close_node g bb_catch_next;
-					v,bb_catch
-				) catches in
-				set_syntax_edge bb (SETry(bb_try,bb_exc,catches,bb_next,e.epos));
-				if bb_try_next != g.g_unreachable then add_cfg_edge bb_try_next bb_next CFGGoto;
-				close_node g bb_try_next;
-				bb_next
-			end in
+			(* We always want to keep catch-blocks, so let's add a pseudo CFG edge if it's unreachable. *)
+			if bb_exc.bb_incoming = [] then add_cfg_edge (if bb_try_next == g.g_unreachable then bb_try else bb_try_next) bb_exc CFGMaybeThrow;
+			let is_reachable = ref (not (bb_try_next == g.g_unreachable)) in
+			let catches = List.map (fun (v,e) ->
+				let bb_catch = create_node (BKCatch v) e.etype e.epos in
+				add_cfg_edge bb_exc bb_catch CFGGoto;
+				let bb_catch_next = block bb_catch e in
+				is_reachable := !is_reachable || (not (bb_catch_next == g.g_unreachable));
+				v,bb_catch,bb_catch_next
+			) catches in
+			let bb_next = if !is_reachable then create_node BKNormal bb.bb_type bb.bb_pos else g.g_unreachable in
+			let catches = List.map (fun (v,bb_catch,bb_catch_next) ->
+				if bb_catch_next != g.g_unreachable then add_cfg_edge bb_catch_next bb_next CFGGoto;
+				close_node g bb_catch_next;
+				v,bb_catch
+			) catches in
+			set_syntax_edge bb (SETry(bb_try,bb_exc,catches,bb_next,e.epos));
+			if bb_try_next != g.g_unreachable then add_cfg_edge bb_try_next bb_next CFGGoto;
+			close_node g bb_try_next;
             close_node g bb_exc;
             close_node g bb;
 			bb_next
@@ -516,7 +522,7 @@ let rec func ctx bb tf t p =
 			block_element bb (mk (TReturn None) t_dynamic e.epos)
 		| TReturn (Some e1) ->
 			begin try
-				let mk_return e1 = mk (TReturn (Some e1)) t_dynamic e.epos in
+				let mk_return e1 = mk (TReturn (Some e1)) t_dynamic e1.epos in
 				block_element_value bb e1 mk_return
 			with Exit ->
 				let bb,e1 = value bb e1 in

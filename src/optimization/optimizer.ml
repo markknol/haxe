@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -373,7 +373,7 @@ let rec type_inline ctx cf f ethis params tret config p ?(self_calling_closure=f
 			l.i_read <- l.i_read + (if !in_loop then 2 else 1);
 			(* never inline a function which contain a delayed macro because its bound
 				to its variables and not the calling method *)
-			if v.v_name = "__dollar__delay_call" then cancel_inlining := true;
+			if v.v_name = "$__delayed_call__" then cancel_inlining := true;
 			let e = { e with eexpr = TLocal l.i_subst } in
 			if l.i_abstract_this then mk (TCast(e,None)) v.v_type e.epos else e
 		| TConst TThis ->
@@ -426,6 +426,7 @@ let rec type_inline ctx cf f ethis params tret config p ?(self_calling_closure=f
 				let rec loop e =
 					let r = match e.eexpr with
 					| TReturn _ -> true
+					| TFunction _ -> false
 					| TIf (_,_,None) | TSwitch (_,_,None) | TFor _ | TWhile (_,_,NormalWhile) -> false (* we might not enter this code at all *)
 					| TTry (a, catches) -> List.for_all has_term_return (a :: List.map snd catches)
 					| TIf (cond,a,Some b) -> has_term_return cond || (has_term_return a && has_term_return b)
@@ -491,8 +492,8 @@ let rec type_inline ctx cf f ethis params tret config p ?(self_calling_closure=f
 			{ e with eexpr = TFunction { tf_args = args; tf_expr = expr; tf_type = f.tf_type } }
 		| TCall({eexpr = TConst TSuper; etype = t},el) ->
 			begin match follow t with
-			| TInst({ cl_constructor = Some ({cf_kind = Method MethInline; cf_expr = Some ({eexpr = TFunction tf})} as cf)},_) ->
-				begin match type_inline ctx cf tf ethis el ctx.t.tvoid None po true with
+			| TInst({ cl_constructor = Some ({cf_kind = Method MethInline; cf_expr = Some ({eexpr = TFunction tf})} as cf)} as c,_) ->
+				begin match type_inline_ctor ctx c cf tf ethis el po with
 				| Some e -> map term e
 				| None -> error "Could not inline super constructor call" po
 				end
@@ -610,6 +611,15 @@ let rec type_inline ctx cf f ethis params tret config p ?(self_calling_closure=f
 		in
 		let e = List.fold_left inline_meta e cf.cf_meta in
 		let e = Display.Diagnostics.secure_generated_code ctx e in
+		if Meta.has (Meta.Custom ":inlineDebug") ctx.meta then begin
+			let se t = s_expr_pretty true t true (s_type (print_context())) in
+			print_endline (Printf.sprintf "Inline %s:\n\tArgs: %s\n\tExpr: %s\n\tResult: %s"
+				cf.cf_name
+				(String.concat "" (List.map (fun (i,e) -> Printf.sprintf "\n\t\t%s<%i> = %s" (i.i_subst.v_name) (i.i_subst.v_id) (se "\t\t" e)) inlined_vars))
+				(se "\t" f.tf_expr)
+				(se "\t" e)
+			);
+		end;
 		(* we need to replace type-parameters that were used in the expression *)
 		if not has_params then
 			Some e
@@ -640,6 +650,29 @@ let rec type_inline ctx cf f ethis params tret config p ?(self_calling_closure=f
 			in
 			let rec map_expr_type e = Type.map_expr_type map_expr_type map_type map_var e in
 			Some (map_expr_type e)
+
+(* Same as type_inline, but modifies the function body to add field inits *)
+and type_inline_ctor ctx c cf tf ethis el po =
+	let field_inits = 
+		let cparams = List.map snd c.cl_params in
+		let ethis = mk (TConst TThis) (TInst (c,cparams)) c.cl_pos in
+		let el = List.fold_left (fun acc cf -> 
+			match cf.cf_kind,cf.cf_expr with
+			| Var _,Some e ->
+				let lhs = mk (TField(ethis,FInstance (c,cparams,cf))) cf.cf_type e.epos in
+				let eassign = mk (TBinop(OpAssign,lhs,e)) cf.cf_type e.epos in
+				eassign :: acc
+			| _ -> acc
+		) [] c.cl_ordered_fields in
+		List.rev el
+	in
+	let tf =
+		if field_inits = [] then tf
+		else
+			let bl = match tf.tf_expr with {eexpr = TBlock b } -> b | x -> [x] in
+			{tf with tf_expr = mk (TBlock (field_inits @ bl)) ctx.t.tvoid c.cl_pos}
+	in
+	type_inline ctx cf tf ethis el ctx.t.tvoid None po true
 
 
 (* ---------------------------------------------------------------------- *)
@@ -1061,6 +1094,9 @@ let reduce_control_flow ctx e = match e.eexpr with
 		optimize_binop e op e1 e2
 	| TUnop (op,flag,esub) ->
 		optimize_unop e op flag esub
+	| TCall ({ eexpr = TField (o,FClosure (c,cf)) } as f,el) ->
+		let fmode = (match c with None -> FAnon cf | Some (c,tl) -> FInstance (c,tl,cf)) in
+		{ e with eexpr = TCall ({ f with eexpr = TField (o,fmode) },el) }
 	| _ ->
 		e
 
@@ -1079,9 +1115,6 @@ let rec reduce_loop ctx e =
 		(match inl with
 		| None -> reduce_expr ctx e
 		| Some e -> reduce_loop ctx e)
-	| TCall ({ eexpr = TField (o,FClosure (c,cf)) } as f,el) ->
-		let fmode = (match c with None -> FAnon cf | Some (c,tl) -> FInstance (c,tl,cf)) in
-		{ e with eexpr = TCall ({ f with eexpr = TField (o,fmode) },el) }
 	| _ ->
 		reduce_expr ctx (reduce_control_flow ctx e))
 
@@ -1212,6 +1245,7 @@ let inline_constructors ctx e =
 		if i < 0 then "n" ^ (string_of_int (-i))
 		else (string_of_int i)
 	in
+	let is_extern_ctor c cf = c.cl_extern || Meta.has Meta.Extern cf.cf_meta in
 	let rec find_locals e = match e.eexpr with
 		| TVar(v,Some e1) ->
 			find_locals e1;
@@ -1224,22 +1258,14 @@ let inline_constructors ctx e =
 						()
 					end
 				| TNew({ cl_constructor = Some ({cf_kind = Method MethInline; cf_expr = Some ({eexpr = TFunction tf})} as cf)} as c,tl,pl) when type_iseq v.v_type e1.etype ->
-					begin match type_inline ctx cf tf (mk (TLocal v) (TInst (c,tl)) e1.epos) pl ctx.t.tvoid None e1.epos true with
+					begin match type_inline_ctor ctx c cf tf (mk (TLocal v) (TInst (c,tl)) e1.epos) pl e1.epos with
 					| Some e ->
-						(* add field inits here because the filter has not run yet (issue #2336) *)
-						let ev = mk (TLocal v) v.v_type e.epos in
-						let el_init = List.fold_left (fun acc cf -> match cf.cf_kind,cf.cf_expr with
-							| Var _,Some e ->
-								let ef = mk (TField(ev,FInstance(c,tl,cf))) cf.cf_type e.epos in
-								let e = mk (TBinop(OpAssign,ef,e)) cf.cf_type e.epos in
-								e :: acc
-							| _ -> acc
-						) el_init c.cl_ordered_fields in
-						let e = match el_init with
+						let e' = match el_init with
 							| [] -> e
 							| _ -> mk (TBlock (List.rev (e :: el_init))) e.etype e.epos
 						in
-						add v e (IKCtor(cf,c.cl_extern || Meta.has Meta.Extern cf.cf_meta));
+						add v e' (IKCtor(cf,is_extern_ctor c cf));
+						find_locals e
 					| None ->
 						()
 					end
@@ -1278,7 +1304,16 @@ let inline_constructors ctx e =
 			find_locals e2
 		| TField({eexpr = TLocal v},fa) when v.v_id < 0 ->
 			begin match extract_field fa with
-			| Some {cf_kind = Var _} -> ()
+			| Some ({cf_kind = Var _} as cf) ->
+				(* Arrays are not supposed to have public var fields, besides "length" (which we handle when inlining),
+				   however, its inlined methods may generate access to private implementation fields (such as internal
+				   native array), in this case we have to cancel inlining.
+				*)
+				if cf.cf_name <> "length" then
+					begin match (IntMap.find v.v_id !vars).ii_kind with
+					| IKArray _ -> cancel v e.epos
+					| _ -> (try ignore(get_field_var v cf.cf_name) with Not_found -> ignore(add_field_var v cf.cf_name e.etype));
+					end
 			| _ -> cancel v e.epos
 			end
 		| TArray({eexpr = TLocal v},{eexpr = TConst (TInt i)}) when v.v_id < 0 ->
@@ -1379,6 +1414,9 @@ let inline_constructors ctx e =
 			in
 			let el = block [] el in
 			mk (TBlock (List.rev el)) e.etype e.epos
+		| TNew({ cl_constructor = Some ({cf_kind = Method MethInline; cf_expr = Some ({eexpr = TFunction _})} as cf)} as c,_,_) when is_extern_ctor c cf ->
+			display_error ctx "Extern constructor could not be inlined" e.epos;
+			Type.map_expr loop e
 		| _ ->
 			Type.map_expr loop e
 	in

@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -573,7 +573,7 @@ and load_complex_type ctx allow_display p (t,pn) =
 				| _ ->
 					error "Can only extend structures" p
 			in
-			let il = List.map (fun (t,_) -> load_instance ctx ~allow_display (t,pn) false p) tl in
+			let il = List.map (fun (t,pn) -> load_instance ctx ~allow_display (t,pn) false p) tl in
 			let tr = ref None in
 			let t = TMono tr in
 			let r = exc_protect ctx (fun r ->
@@ -663,6 +663,10 @@ and load_complex_type ctx allow_display p (t,pn) =
 				cf_overloads = [];
 			} in
 			init_meta_overloads ctx None cf;
+			if ctx.is_display_file then begin
+				Display.DisplayEmitter.check_display_metadata ctx cf.cf_meta;
+				Display.DisplayEmitter.maybe_display_field ctx (cf.cf_name_pos) cf;
+			end;
 			PMap.add n cf acc
 		in
 		mk_anon (List.fold_left loop PMap.empty l)
@@ -1558,7 +1562,18 @@ let type_function ctx args ret fmode f do_display p =
 	ctx.curfun <- fmode;
 	ctx.ret <- ret;
 	ctx.opened <- [];
-	let e = match f.f_expr with None -> error "Function body required" p | Some e -> e in
+	let e = match f.f_expr with
+		| None ->
+			if ctx.com.display.dms_error_policy = EPIgnore then
+				(* when we don't care because we're in display mode, just act like
+				   the function has an empty block body. this is fine even if function
+				   defines a return type, because returns aren't checked in this mode
+				*)
+				EBlock [],p
+			else
+				error "Function body required" p
+		| Some e -> e
+	in
 	let e = if not do_display then
 		type_expr ctx e NoValue
 	else begin
@@ -1569,7 +1584,7 @@ let type_function ctx args ret fmode f do_display p =
 		with
 		| Parser.TypePath (_,None,_) | Exit ->
 			type_expr ctx e NoValue
-		| Display.DisplayType (t,_,_) | Display.DisplaySignatures ([(t,_)],_) when (match follow t with TMono _ -> true | _ -> false) ->
+		| Display.DisplayType (t,_,_) when (match follow t with TMono _ -> true | _ -> false) ->
 			type_expr ctx (if ctx.com.display.dms_kind = DMToplevel then Display.ExprPreprocessing.find_enclosing ctx.com e else e) NoValue
 	end in
 	let e = match e.eexpr with
@@ -2128,10 +2143,6 @@ module ClassInitializer = struct
 			end
 		end
 
-	let check_field_display ctx p cf =
- 		if Display.is_display_position p then
-			Display.DisplayEmitter.display_field ctx.com.display cf p
-
 	let bind_var (ctx,cctx,fctx) cf e =
 		let c = cctx.tclass in
 		let p = cf.cf_pos in
@@ -2163,7 +2174,7 @@ module ClassInitializer = struct
 
 		match e with
 		| None ->
-			if fctx.is_display_field then check_field_display ctx (cf.cf_name_pos) cf;
+			if fctx.is_display_field then Display.DisplayEmitter.maybe_display_field ctx (cf.cf_name_pos) cf;
 		| Some e ->
 			if requires_value_meta ctx.com (Some c) then cf.cf_meta <- ((Meta.Value,[e],null_pos) :: cf.cf_meta);
 			let check_cast e =
@@ -2245,7 +2256,7 @@ module ClassInitializer = struct
 					let e = check_cast e in
 					cf.cf_expr <- Some e;
 					cf.cf_type <- t;
-					if fctx.is_display_field then check_field_display ctx (cf.cf_name_pos) cf;
+					if fctx.is_display_field then Display.DisplayEmitter.maybe_display_field ctx (cf.cf_name_pos) cf;
 				end;
 				t
 			) "bind_var" in
@@ -2554,7 +2565,7 @@ module ClassInitializer = struct
 							| _ -> c.cl_init <- Some e);
 						cf.cf_expr <- Some (mk (TFunction tf) t p);
 						cf.cf_type <- t;
-						if fctx.is_display_field then check_field_display ctx (cf.cf_name_pos) cf;
+						if fctx.is_display_field then Display.DisplayEmitter.maybe_display_field ctx (cf.cf_name_pos) cf;
 			end;
 			t
 		) "type_fun" in
@@ -3511,18 +3522,25 @@ let type_module ctx mpath file ?(is_extern=false) tdecls p =
 
 let resolve_module_file com m remap p =
 	let forbid = ref false in
-	let file = (match m with
+	let compose_path no_rename =
+		(match m with
 		| [] , name -> name
 		| x :: l , name ->
 			let x = (try
 				match PMap.find x com.package_rules with
 				| Forbidden -> forbid := true; x
+				| Directory d -> if no_rename then x else d
 				| Remap d -> remap := d :: l; d
 				with Not_found -> x
 			) in
 			String.concat "/" (x :: l) ^ "/" ^ name
-	) ^ ".hx" in
-	let file = Common.find_file com file in
+		) ^ ".hx"
+	in
+	let file = try
+			Common.find_file com (compose_path false)
+		with Not_found ->
+			Common.find_file com (compose_path true)
+	in
 	let file = (match String.lowercase (snd m) with
 	| "con" | "aux" | "prn" | "nul" | "com1" | "com2" | "com3" | "lpt1" | "lpt2" | "lpt3" when Sys.os_type = "Win32" ->
 		(* these names are reserved by the OS - old DOS legacy, such files cannot be easily created but are reported as visible *)

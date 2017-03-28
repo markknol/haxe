@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -23,6 +23,7 @@ open Globals
 
 type package_rule =
 	| Forbidden
+	| Directory of string
 	| Remap of string
 
 type pos = Globals.pos
@@ -36,6 +37,14 @@ type basic_types = {
 	mutable tstring : t;
 	mutable tarray : t -> t;
 }
+
+let const_type basic const default =
+	match const with
+	| TString _ -> basic.tstring
+	| TInt _ -> basic.tint
+	| TFloat _ -> basic.tfloat
+	| TBool _ -> basic.tbool
+	| _ -> default
 
 type stats = {
 	s_files_parsed : int ref;
@@ -207,6 +216,7 @@ module IdentifierType = struct
 		| ITGlobal of module_type * string * Type.t
 		| ITType of module_type
 		| ITPackage of string
+		| ITLiteral of string
 		| ITTimer of string
 
 	let get_name = function
@@ -216,6 +226,7 @@ module IdentifierType = struct
 		| ITGlobal(_,s,_) -> s
 		| ITType mt -> snd (t_infos mt).mt_path
 		| ITPackage s -> s
+		| ITLiteral s -> s
 		| ITTimer s -> s
 end
 
@@ -312,6 +323,8 @@ let get_signature com =
 		let s = Digest.string str in
 		com.defines_signature <- Some s;
 		s
+
+let is_php7 com = com.platform = Php && PMap.exists "php7" com.defines
 
 module CompilationServer = struct
 	type cache = {
@@ -472,6 +485,8 @@ module Define = struct
 		| HaxeBoot
 		| HaxeVer
 		| HxcppApiLevel
+		| HxcppGcGenerational
+		| HxcppDebugger
 		| IncludePrefix
 		| Interp
 		| JavaVer
@@ -479,6 +494,8 @@ module Define = struct
 		| JsClassic
 		| JsEs
 		| JsUnflatten
+		| JsSourceMap
+		| SourceMap
 		| KeepOldOutput
 		| LoopUnrollMaxCost
 		| LuaVer
@@ -491,7 +508,6 @@ module Define = struct
 		| NetworkSandbox
 		| NetVer
 		| NetTarget
-		| NoAnalyzer
 		| NoCompilation
 		| NoCOpt
 		| NoDeprecationWarnings
@@ -565,6 +581,8 @@ module Define = struct
 		| HaxeBoot -> ("haxe_boot","Given the name 'haxe' to the flash boot class instead of a generated name")
 		| HaxeVer -> ("haxe_ver","The current Haxe version value")
 		| HxcppApiLevel -> ("hxcpp_api_level","Provided to allow compatibility between hxcpp versions")
+		| HxcppGcGenerational -> ("HXCPP_GC_GENERATIONAL","Experimental Garbage Collector")
+		| HxcppDebugger -> ("HXCPP_DEBUGGER","Include additional information for HXCPP_DEBUGGER")
 		| IncludePrefix -> ("include_prefix","prepend path to generated include files")
 		| Interp -> ("interp","The code is compiled to be run with --interp")
 		| JavaVer -> ("java_ver", "<version:5-7> Sets the Java version to be targeted")
@@ -572,6 +590,8 @@ module Define = struct
 		| JsClassic -> ("js_classic","Don't use a function wrapper and strict mode in JS output")
 		| JsEs -> ("js_es","Generate JS compilant with given ES standard version (default 5)")
 		| JsUnflatten -> ("js_unflatten","Generate nested objects for packages and types")
+		| JsSourceMap -> ("js_source_map","Generate JavaScript source map even in non-debug mode")
+		| SourceMap -> ("source_map","Generate source map for compiled files (Currently supported for php7 only)")
 		| KeepOldOutput -> ("keep_old_output","Keep old source files in the output directory (for C#/Java)")
 		| LoopUnrollMaxCost -> ("loop_unroll_max_cost","Maximum cost (number of expressions * iterations) before loop unrolling is canceled (default 250)")
 		| LuaJit -> ("lua_jit","Enable the jit compiler for lua (version 5.2 only")
@@ -584,7 +604,6 @@ module Define = struct
 		| NekoSource -> ("neko_source","Output neko source instead of bytecode")
 		| NekoV1 -> ("neko_v1","Keep Neko 1.x compatibility")
 		| NetworkSandbox -> ("network-sandbox","Use local network sandbox instead of local file access one")
-		| NoAnalyzer -> ("no-analyzer","Disable the static analyzer")
 		| NoCompilation -> ("no-compilation","Disable final compilation for Cs, Cpp and Java")
 		| NoCOpt -> ("no_copt","Disable completion optimization (for debug purposes)")
 		| NoDebug -> ("no_debug","Remove all debug macros from cpp output")
@@ -599,7 +618,7 @@ module Define = struct
 		| NoTraces -> ("no_traces","Disable all trace calls")
 		| Objc -> ("objc","Sets the hxcpp output to objective-c++ classes. Must be defined for interop")
 		| PhpPrefix -> ("php_prefix","Compiled with --php-prefix")
-		| RealPosition -> ("real_position","Disables Haxe source mapping when targetting C#, removes position comments in Java output")
+		| RealPosition -> ("real_position","Disables Haxe source mapping when targetting C#, removes position comments in Java and Php7 output")
 		| ReplaceFiles -> ("replace_files","GenCommon internal")
 		| Scriptable -> ("scriptable","GenCPP internal")
 		| ShallowExpose -> ("shallow-expose","Expose types to surrounding scope of Haxe generated closure without writing to window object")
@@ -698,11 +717,17 @@ let get_config com =
 			pf_reserved_type_paths = [([],"Object");([],"Error")];
 		}
 	| Php ->
-		{
-			default_config with
-			pf_static = false;
-			pf_pad_nulls = true;
-		}
+		if is_php7 com then
+			{
+				default_config with
+				pf_static = false;
+			}
+		else
+			{
+				default_config with
+				pf_static = false;
+				pf_pad_nulls = true;
+			}
 	| Cpp ->
 		{
 			default_config with
@@ -1115,6 +1140,13 @@ let float_repres f =
 			if f = float_of_string s2 then s2 else
 			Printf.sprintf "%.18g" f
 		in valid_float_lexeme float_val
+
+let hash f =
+	let h = ref 0 in
+	for i = 0 to String.length f - 1 do
+		h := !h * 223 + int_of_char (String.unsafe_get f i);
+	done;
+	if Sys.word_size = 64 then Int32.to_int (Int32.shift_right (Int32.shift_left (Int32.of_int !h) 1) 1) else !h
 
 let add_diagnostics_message com s p sev =
 	let di = com.shared.shared_display_information in

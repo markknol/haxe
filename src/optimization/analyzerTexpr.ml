@@ -1,6 +1,6 @@
 (*
 	The Haxe Compiler
-	Copyright (C) 2005-2016  Haxe Foundation
+	Copyright (C) 2005-2017  Haxe Foundation
 
 	This program is free software; you can redistribute it and/or
 	modify it under the terms of the GNU General Public License
@@ -29,6 +29,8 @@ let rec is_true_expr e1 = match e1.eexpr with
 	| TConst(TBool true) -> true
 	| TParenthesis e1 -> is_true_expr e1
 	| _ -> false
+
+let is_stack_allocated c = Meta.has Meta.StructAccess c.cl_meta
 
 let map_values ?(allow_control_flow=true) f e =
 	let branching = ref false in
@@ -123,13 +125,13 @@ let rec can_be_used_as_value com e =
 		(* | TCall _ | TNew _ when (match com.platform with Cpp | Php -> true | _ -> false) -> raise Exit *)
 		| TReturn _ | TThrow _ | TBreak | TContinue -> raise Exit
 		| TUnop((Increment | Decrement),_,_) when not (target_handles_unops com) -> raise Exit
-		| TNew _ when com.platform = Php -> raise Exit
+		| TNew _ when com.platform = Php && not (Common.is_php7 com) -> raise Exit
 		| TFunction _ -> ()
 		| _ -> Type.iter loop e
 	in
 	try
 		begin match com.platform,e.eexpr with
-			| (Cs | Cpp | Java | Flash),TConst TNull -> raise Exit
+			| (Cs | Cpp | Java | Flash | Lua),TConst TNull -> raise Exit
 			| _ -> ()
 		end;
 		loop e;
@@ -151,8 +153,27 @@ let is_unbound_call_that_might_have_side_effects v el = match v.v_name,el with
 
 let is_ref_type = function
 	| TType({t_path = ["cs"],("Ref" | "Out")},_) -> true
+	| TType({t_path = path},_) when path = Genphp7.ref_type_path -> true
+	| TType({t_path = ["cpp"],("Reference")},_) -> true
 	| TAbstract({a_path=["hl";"types"],"Ref"},_) -> true
 	| _ -> false
+
+let rec is_asvar_type t =
+	let check meta =
+		AnalyzerConfig.has_analyzer_option meta "as_var"
+	in
+	match t with
+	| TInst(c,_) -> check c.cl_meta
+	| TEnum(en,_) -> check en.e_meta
+	| TType(t,tl) -> check t.t_meta || (is_asvar_type (apply_params t.t_params tl t.t_type))
+	| TAbstract(a,_) -> check a.a_meta
+	| TLazy f -> is_asvar_type (!f())
+	| TMono r ->
+		(match !r with
+		| Some t -> is_asvar_type t
+		| _ -> false)
+	| _ ->
+		false
 
 let type_change_ok com t1 t2 =
 	if t1 == t2 then
@@ -259,19 +280,7 @@ module TexprFilter = struct
 			let e = mk (TWhile(Codegen.mk_parent e_true,e_block,NormalWhile)) e.etype p in
 			loop e
 		| TFor(v,e1,e2) ->
-			let v' = alloc_var v.v_name e1.etype e1.epos in
-			let ev' = mk (TLocal v') e1.etype e1.epos in
-			let t1 = (Abstract.follow_with_abstracts e1.etype) in
-			let ehasnext = mk (TField(ev',quick_field t1 "hasNext")) (tfun [] com.basic.tbool) e1.epos in
-			let ehasnext = mk (TCall(ehasnext,[])) com.basic.tbool ehasnext.epos in
-			let enext = mk (TField(ev',quick_field t1 "next")) (tfun [] v.v_type) e1.epos in
-			let enext = mk (TCall(enext,[])) v.v_type e1.epos in
-			let eassign = mk (TVar(v,Some enext)) com.basic.tvoid e.epos in
-			let ebody = Type.concat eassign e2 in
-			let e = mk (TBlock [
-				mk (TVar (v',Some e1)) com.basic.tvoid e1.epos;
-				mk (TWhile((mk (TParenthesis ehasnext) ehasnext.etype ehasnext.epos),ebody,NormalWhile)) com.basic.tvoid e1.epos;
-			]) com.basic.tvoid e.epos in
+			let e = Codegen.for_remap com v e1 e2 e.epos in
 			loop e
 		| _ ->
 			Type.map_expr loop e
@@ -362,13 +371,19 @@ module InterferenceReport = struct
 		let rec loop e = match e.eexpr with
 			(* vars *)
 			| TLocal v ->
-				set_var_read ir v
+				set_var_read ir v;
+				if v.v_capture then set_state_read ir;
 			| TBinop(OpAssign,{eexpr = TLocal v},e2) ->
 				set_var_write ir v;
+				if v.v_capture then set_state_write ir;
 				loop e2
 			| TBinop(OpAssignOp _,{eexpr = TLocal v},e2) ->
 				set_var_read ir v;
 				set_var_write ir v;
+				if v.v_capture then begin
+					set_state_read ir;
+					set_state_write ir;
+				end;
 				loop e2
 			| TUnop((Increment | Decrement),_,{eexpr = TLocal v}) ->
 				set_var_read ir v;
@@ -605,6 +620,7 @@ module Fusion = struct
 			let b = num_uses <= 1 &&
 			        num_writes = 0 &&
 			        can_be_used_as_value &&
+					not (is_asvar_type v.v_type) &&
 			        (is_compiler_generated || config.optimize && config.fusion && config.user_var_fusion && not has_type_params)
 			in
 			if config.fusion_debug then begin
@@ -620,7 +636,15 @@ module Fusion = struct
 				let e1 = {e1 with eexpr = TVar(v1,Some e2)} in
 				state#dec_writes v1;
 				fuse (e1 :: acc) el
-			| ({eexpr = TVar(v1,None)} as e1) :: ({eexpr = TIf(eif,_,Some _)} as e2) :: el when can_be_used_as_value com e2 && not (ExtType.is_void e2.etype) && (match com.platform with Php -> false | Cpp when not (Common.defined com Define.Cppia) -> false | _ -> true) ->
+			| ({eexpr = TVar(v1,None)} as e1) :: ({eexpr = TIf(eif,_,Some _)} as e2) :: el
+				when
+					can_be_used_as_value com e2 &&
+					not (ExtType.is_void e2.etype) &&
+					(match com.platform with
+						| Php when not (Common.is_php7 com) -> false
+						| Cpp when not (Common.defined com Define.Cppia) -> false
+						| _ -> true)
+				->
 				begin try
 					let i = ref 0 in
 					let check_assign e = match e.eexpr with
@@ -675,7 +699,7 @@ module Fusion = struct
 							let el = List.map replace el in
 							let e2 = replace e2 in
 							e2,el
-						| Php | Cpp  when not (Common.defined com Define.Cppia) ->
+						| Php | Cpp  when not (Common.defined com Define.Cppia) && not (Common.is_php7 com) ->
 							let is_php_safe e1 =
 								let rec loop e = match e.eexpr with
 									| TCall _ -> raise Exit
@@ -684,7 +708,7 @@ module Fusion = struct
 								in
 								try loop e1; true with Exit -> false
 							in
-							(* PHP doesn't like call()() expressions. *)
+							(* PHP5 doesn't like call()() expressions. *)
 							let e2 = if com.platform = Php && not (is_php_safe e1) then explore e2 else replace e2 in
 							let el = handle_el el in
 							e2,el
@@ -787,7 +811,7 @@ module Fusion = struct
 							let e3 = replace e3 in
 							if not !found && has_state_read ir then raise Exit;
 							{e with eexpr = TBinop(OpAssign,{ea with eexpr = TArray(e1,e2)},e3)}
-						| TBinop(op,e1,e2) when (match com.platform with Cpp | Php -> true | _ -> false) ->
+						| TBinop(op,e1,e2) when (match com.platform with Cpp | Php when not (Common.is_php7 com) -> true | _ -> false) ->
 							let e1 = replace e1 in
 							let temp_found = !found in
 							found := false;
@@ -912,7 +936,7 @@ module Cleanup = struct
 				let e2 = loop e2 in
 				let e3 = loop e3 in
 				if_or_op e e1 e2 e3;
-			| TUnop((Increment | Decrement),_,({eexpr = TConst _} as e1)) ->
+			| TUnop((Increment | Decrement),_,e1) when (match (Texpr.skip e1).eexpr with TConst _ -> true | _ -> false) ->
 				loop e1
 			| TCall({eexpr = TLocal v},_) when is_really_unbound v ->
 				e

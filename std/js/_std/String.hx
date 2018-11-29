@@ -45,7 +45,7 @@
 	}
 	
 	static function __init__() : Void {
-		untyped __feature__('String.fromCharCode', js.Syntax.code("if( String.fromCodePoint == null ) String.fromCodePoint = function(c) { return c < 0x10000 ? String.fromCharCode(c) : String.fromCharCode((c>>10)+0xD7C0)+String.fromCharCode((c&0x3FF)+0xDC00); }"));
+		untyped __feature__('String.fromCharCode', js.Syntax.code("if(String.fromCodePoint==null)String.fromCodePoint=function(c){return c<0x10000?String.fromCharCode(c):String.fromCharCode((c>>10)+0xD7C0)+String.fromCharCode((c&0x3FF)+0xDC00);};"));
 	}
 	
 }

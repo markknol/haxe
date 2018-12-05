@@ -735,7 +735,7 @@ and gen_expr ctx e =
 		print ctx "try%s" spaceChar;
 		gen_expr ctx etry;
 		check_var_declaration v;
-		print ctx "catch(%s)" (get_id v.v_name);
+		print ctx "%scatch(%s)%s" spaceChar (get_id v.v_name) spaceChar;
 		gen_expr ctx ecatch
 	| TTry _ ->
 		abort "Unhandled try/catch, please report" e.epos

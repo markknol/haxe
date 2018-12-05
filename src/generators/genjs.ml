@@ -106,6 +106,33 @@ let es5kwds = [
 	"true"; "try"; "typeof"; "var"; "void"; "while"; "with"; "yield"
 ]
 
+let name_chars = [|
+	'_'; 'a'; 'A'; 'b'; 'B'; 'c'; 'C'; 'd'; 'D'; 'e'; 'E'; 'f'; 'F'; 'g'; 'G'; 
+	'h'; 'H'; 'i'; 'I'; 'j'; 'J'; 'k'; 'K'; 'l'; 'L'; 'm'; 'M'; 'n'; 'N'; 'o'; 'O'; 
+	'p'; 'P'; 'q'; 'Q'; 'r'; 'R'; 's'; 'S'; 't'; 'T'; 'u'; 'U'; 'v'; 'V'; 'w'; 'W';
+	'x'; 'X'; 'y'; 'Y'; 'z'; 'Z'
+|]
+
+(* store obfuscated names in hash table *)
+let name_cache = Hashtbl.create 0
+
+(* generate small 2-char-length fieldname*)
+let get_short_name chars id = Printf.sprintf "%c%d"
+	chars.((id / 10) mod Array.length chars) 
+	((id / 530) * 10 + (id mod 10))
+
+let name_id = ref 0
+
+let get_id name = 
+	if Hashtbl.mem name_cache name then
+		Hashtbl.find name_cache name
+	else begin
+		incr name_id;
+		let id = get_short_name name_chars !name_id in 
+		Hashtbl.add name_cache name id;
+		id
+	end
+
 (* Identifiers Haxe reserves to make the JS output cleaner. These can still be used in untyped code (TLocal),
    but are escaped upon declaration. *)
 let kwds2 =
@@ -130,6 +157,7 @@ let valid_js_ident s =
 		true
 	with Exit ->
 		false
+
 
 let field s = if Hashtbl.mem kwds s || not (valid_js_ident s) then "[\"" ^ s ^ "\"]" else "." ^ s
 let ident s = if Hashtbl.mem kwds s then "$" ^ s else s
@@ -474,7 +502,7 @@ and gen_expr ctx e =
 	let clear_mapping = add_mapping ctx e in
 	(match e.eexpr with
 	| TConst c -> gen_constant ctx e.epos c
-	| TLocal v -> spr ctx (ident v.v_name)
+	| TLocal v -> spr ctx (ident (get_id v.v_name))
 	(*| TArray (e1,{ eexpr = TConst (TString s) }) when valid_js_ident s && (match e1.eexpr with TConst (TInt _|TFloat _) -> false | _ -> true) ->
 		gen_value ctx (add_objectdecl_parens e1);
 		spr ctx (field s)*)
@@ -598,7 +626,7 @@ and gen_expr ctx e =
 		ctx.in_loop <- false;
 		let args = List.map (fun (v,_) ->
 			check_var_declaration v;
-			ident v.v_name
+			ident (get_id v.v_name)
 		) f.tf_args in
 		print ctx "function(%s)%s" (String.concat "," args) spaceChar;
 		gen_expr ctx (fun_block ctx f e.epos);
@@ -617,7 +645,7 @@ and gen_expr ctx e =
 	| TVar (v,eo) ->
 		spr ctx "var ";
 		check_var_declaration v;
-		spr ctx (ident v.v_name);
+		spr ctx (ident (get_id v.v_name));
 		begin match eo with
 			| None -> ()
 			| Some e ->
@@ -689,7 +717,7 @@ and gen_expr ctx e =
 				let id = ctx.id_counter in
 				ctx.id_counter <- ctx.id_counter + 1;
 				let name = "$it" ^ string_of_int id in
-				print ctx "var %s%s=%s" name spaceChar spaceChar;
+				print ctx "var %s%s=%s" (get_id name) spaceChar spaceChar;
 				gen_value ctx it;
 				newline ctx;
 				name
@@ -697,7 +725,7 @@ and gen_expr ctx e =
 		print ctx "while%s(%s.hasNext())%s{" spaceChar it spaceChar;
 		let bend = open_block ctx in
 		newline ctx;
-		print ctx "var %s%s=%s%s.next()" (ident v.v_name) spaceChar spaceChar it;
+		print ctx "var %s%s=%s%s.next()" (ident (get_id v.v_name)) spaceChar spaceChar it;
 		gen_block_element ctx e;
 		bend();
 		newline ctx;
@@ -707,7 +735,7 @@ and gen_expr ctx e =
 		print ctx "try%s" spaceChar;
 		gen_expr ctx etry;
 		check_var_declaration v;
-		print ctx "catch(%s)" v.v_name;
+		print ctx "catch(%s)" (get_id v.v_name);
 		gen_expr ctx ecatch
 	| TTry _ ->
 		abort "Unhandled try/catch, please report" e.epos
@@ -1128,7 +1156,7 @@ let generate_class ctx c =
 		| None -> print ctx "%s.prototype%s=%s{" p ctx.spaceChar ctx.spaceChar;
 		| Some (csup,_) ->
 			let psup = ctx.type_accessor (TClassDecl csup) in
-			print ctx "%s.__super__%s=%s%s" p psup;
+			print ctx "%s.__super__ = %s" p psup;
 			newline ctx;
 			print ctx "%s.prototype=$extend(%s.prototype,{" p psup;
 		);

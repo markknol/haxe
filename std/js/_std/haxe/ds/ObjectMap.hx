@@ -40,7 +40,7 @@ class ObjectMap<K:{ }, V> implements haxe.Constraints.IMap<K,V> {
 		return untyped obj.__id__;
 	}
 
-	var h : { };
+	var h : {  };
 
 	public function new() : Void {
 		h = { __keys__: {} };
@@ -63,19 +63,14 @@ class ObjectMap<K:{ }, V> implements haxe.Constraints.IMap<K,V> {
 	public function remove( key : K ) : Bool {
 		var id = getId(key);
 		if ( untyped h.__keys__[id] == null ) return false;
-		untyped  __js__("delete")(h[id]);
-		untyped  __js__("delete")(h.__keys__[id]);
+		js.Syntax.delete(h, id);
+		js.Syntax.delete(untyped h.__keys__, id);
 		return true;
 	}
 
 	public function keys() : Iterator<K> {
 		var a = [];
-		untyped {
-			__js__("for( var key in this.h.__keys__ ) {");
-				if( h.hasOwnProperty(key) )
-					a.push(h.__keys__[key]);
-			__js__("}");
-		}
+		js.Syntax.code("for (var key in {0}) { if ({1}.hasOwnProperty(key)) {2}.push({0}[key]); }", untyped h.__keys__, h, a);
 		return a.iterator();
 	}
 

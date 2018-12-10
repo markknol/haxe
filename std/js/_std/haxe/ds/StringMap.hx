@@ -50,7 +50,7 @@ private class StringMapIterator<T> {
 	}
 
 	inline function isReserved(key:String) : Bool {
-		return untyped __js__("__map_reserved")[key] != null;
+		return js.Syntax.code("__map_reserved[{0}]", key) != null;
 	}
 
 	public inline function set( key : String, value : T ) : Void {
@@ -105,20 +105,12 @@ private class StringMapIterator<T> {
 	}
 
 	function arrayKeys() : Array<String> {
-		var out = [];
-		untyped {
-			__js__("for( var key in this.h ) {");
-				if( h.hasOwnProperty(key) )
-					out.push(key);
-			__js__("}");
+		var a = [];
+		js.Syntax.code("for (var key in {0}) { if({0}.hasOwnProperty(key)) {1}.push(key); }", h, a);
+		if( rh != null ) {
+			js.Syntax.code("for (var key in {0}) { if (key.charCodeAt(0) === {1}) {2}.push(key.substr(1)); }", rh, "$".code, a);
 		}
-		if( rh != null ) untyped {
-			__js__("for( var key in this.rh ) {");
-				if( key.charCodeAt(0) == "$".code )
-					out.push(key.substr(1));
-			__js__("}");
-		}
-		return out;
+		return a;
 	}
 
 	public inline function iterator() : Iterator<T> {
@@ -152,7 +144,7 @@ private class StringMapIterator<T> {
 	}
 
 	static function __init__() : Void {
-		untyped __js__("var __map_reserved = {};");
+		js.Syntax.code("var __map_reserved = {};");
 	}
 
 }

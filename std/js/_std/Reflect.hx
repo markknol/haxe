@@ -51,11 +51,9 @@
 
 	public static function fields( o : Dynamic ) : Array<String> {
 		var a = [];
-		if (o != null) untyped {
+		if (o != null) {
 			var hasOwnProperty = js.Object.prototype.hasOwnProperty;
-			__js__("for( var f in o ) {");
-			if( f != "__id__" && f != "hx__closures__" && hasOwnProperty.call(o, f) ) a.push(f);
-			__js__("}");
+			js.Syntax.code('for( var f in {0} ) { if ( f != "__id__" && f != "hx__closures__" && {2}.call({0}, f) ) {1}.push(f); }', o, a, hasOwnProperty);
 		}
 		return a;
 	}
@@ -105,8 +103,7 @@
 	@:overload(function( f : Array<Dynamic> -> Void ) : Dynamic {})
 	public static function makeVarArgs( f : Array<Dynamic> -> Dynamic ) : Dynamic {
 		return function() {
-			var a = untyped Array.prototype.slice.call(__js__("arguments"));
-			return f(a);
+			return f(js.Syntax.code("Array.prototype.slice.call(arguments)"));
 		};
 	}
 

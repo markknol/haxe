@@ -125,7 +125,7 @@ class Boot {
 					// strange error on IE
 					return "???";
 				}
-				if( tostr != null && tostr != __js__("Object.toString") && js.Syntax.typeof(tostr) == "function" ) {
+				if( tostr != null && tostr != js.Syntax.code("Object.toString") && js.Syntax.typeof(tostr) == "function" ) {
 					var s2 = o.toString();
 					if( s2 != "[object Object]")
 						return s2;
@@ -134,11 +134,11 @@ class Boot {
 				var str = "{\n";
 				s += "\t";
 				var hasp = (o.hasOwnProperty != null);
-				__js__("for( var k in o ) {");
+				__js__("for( var k in {0} ) {", o);
 					if( hasp && !o.hasOwnProperty(k) )
-						__js__("continue");
+						js.Syntax.code("continue");
 					if( k == "prototype" || k == "__class__" || k == "__super__" || k == "__interfaces__" || k == "__properties__" )
-						__js__("continue");
+						js.Syntax.code("continue");
 					if( str.length != 2 )
 						str += ", \n";
 					str += s + k + " : "+__string_rec(o[k],s);
@@ -225,9 +225,11 @@ class Boot {
 		var name = untyped __toStr.call(o).slice(8, -1);
 		// exclude general Object and Function
 		// also exclude Math and JSON, because instanceof cannot be called on them
-		if (name == "Object" || name == "Function" || name == "Math" || name == "JSON")
-			return null;
-		return name;
+		return 
+			if (name == "Object" || name == "Function" || name == "Math" || name == "JSON")
+				null;
+			else 
+				name;
 	}
 
 	// check for usable native JS object

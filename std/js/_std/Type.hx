@@ -126,12 +126,12 @@ enum ValueType {
 	}
 
 	public static function createEmptyInstance<T>( cl : Class<T> ) : T untyped {
-		__js__("function empty() {}; empty.prototype = cl.prototype");
-		return __js__("new empty()");
+		js.Syntax.code("function empty() {}; empty.prototype = {0}.prototype", cl);
+		return js.Syntax.code("new empty()");
 	}
 	#else
 	public static function createInstance<T>( cl : Class<T>, args : Array<Dynamic> ) : T untyped {
-		return untyped __js__("new ({0})", Function.prototype.bind.apply(cl, [null].concat(args)));
+		return js.Syntax.code("new ({0})", Function.prototype.bind.apply(cl, [null].concat(args)));
 	}
 
 	public static inline function createEmptyInstance<T>( cl : Class<T> ) : T {
@@ -183,7 +183,7 @@ enum ValueType {
 
 	public static function getInstanceFields( c : Class<Dynamic> ) : Array<String> {
 		var a = [];
-		untyped __js__("for(var i in c.prototype) a.push(i)");
+		untyped __js__("for(var i in {0}.prototype) { {1}.push(i); }", c, a);
 		a.remove("__class__");
 		a.remove("__properties__");
 		return a;

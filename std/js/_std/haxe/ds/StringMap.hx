@@ -107,16 +107,14 @@ private class StringMapIterator<T> {
 	function arrayKeys() : Array<String> {
 		var out = [];
 		untyped {
-			__js__("for( var key in this.h ) {");
-				if( h.hasOwnProperty(key) )
-					out.push(key);
-			__js__("}");
+			__js__("for( var key in {0} ) { {1}; }", h, 
+				if( h.hasOwnProperty(key) ) 
+					out.push(key));
 		}
 		if( rh != null ) untyped {
-			__js__("for( var key in this.rh ) {");
-				if( key.charCodeAt(0) == "$".code )
-					out.push(key.substr(1));
-			__js__("}");
+			__js__("for( var key in {0} ) { {1}; }", rh, 
+				if( key.charCodeAt(0) == "$".code ) 
+					out.push(key.substr(1)));
 		}
 		return out;
 	}

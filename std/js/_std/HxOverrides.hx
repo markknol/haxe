@@ -96,8 +96,7 @@ class HxOverrides {
 			i += len;
 			if (i < 0) i = 0;
 		}
-		while (i < len)
-		{
+		while (i < len) {
 			if (js.Syntax.strictEq(a[i], obj))
 				return i;
 			i++;
@@ -112,8 +111,7 @@ class HxOverrides {
 			i = len - 1;
 		else if (i < 0)
 			i += len;
-		while (i >= 0)
-		{
+		while (i >= 0) {
 			if (js.Syntax.strictEq(a[i], obj))
 				return i;
 			i--;
@@ -129,16 +127,12 @@ class HxOverrides {
 	}
 
 	@:pure
-	static function iter<T>( a : Array<T> ) : Iterator<T> untyped {
+	static function iter<T>( a : Array<T> ) : Iterator<T>  {
+		var cur = 0;
+		var arr = a;
 		return {
-			cur : 0,
-			arr : a,
-			hasNext : function() {
-				return __this__.cur < __this__.arr.length;
-			},
-			next : function() {
-				return __this__.arr[__this__.cur++];
-			}
+			hasNext : () -> cur < arr.length,
+			next : () -> arr[cur++],
 		};
 	}
 

@@ -63,28 +63,27 @@ class ObjectMap<K:{ }, V> implements haxe.Constraints.IMap<K,V> {
 	public function remove( key : K ) : Bool {
 		var id = getId(key);
 		if ( untyped h.__keys__[id] == null ) return false;
-		untyped  __js__("delete")(h[id]);
-		untyped  __js__("delete")(h.__keys__[id]);
+		js.Syntax.delete(h, id);
+		js.Syntax.delete(untyped h.__keys__, id);
 		return true;
 	}
 
 	public function keys() : Iterator<K> {
 		var a = [];
 		untyped {
-			__js__("for( var key in this.h.__keys__ ) {");
+			__js__("for( var key in {0}.__keys__ ) { {1}; }", h,
 				if( h.hasOwnProperty(key) )
-					a.push(h.__keys__[key]);
-			__js__("}");
+					a.push(h.__keys__[key]));
 		}
 		return a.iterator();
 	}
 
 	public function iterator() : Iterator<V> {
-		return untyped {
-			ref : h,
-			it : keys(),
-			hasNext : function() { return __this__.it.hasNext(); },
-			next : function() { var i = __this__.it.next(); return __this__.ref[getId(i)]; }
+		var it = keys();
+		var ref = h;
+		return {
+			hasNext: () -> it.hasNext(),
+			next: () -> untyped ref[getId(it.next())],
 		};
 	}
 

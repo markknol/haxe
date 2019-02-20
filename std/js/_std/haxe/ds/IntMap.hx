@@ -49,16 +49,16 @@ package haxe.ds;
 
 	public function keys() : Iterator<Int> {
 		var a = [];
-		untyped __js__("for( var key in {0} ) {1}", h, if( h.hasOwnProperty(key) ) a.push(key|0));
+		untyped __js__("for( var key in {0} ) { {1}; }", h, if( h.hasOwnProperty(key) ) a.push(key|0));
 		return a.iterator();
 	}
 
 	public function iterator() : Iterator<T> {
-		return untyped {
-			ref : h,
-			it : keys(),
-			hasNext : function() { return __this__.it.hasNext(); },
-			next : function() { var i = __this__.it.next(); return __this__.ref[i]; }
+		var ref = h;
+		var it = keys();
+		return {
+			hasNext: () -> it.hasNext(),
+			next: () -> ref[it.next()],
 		};
 	}
 

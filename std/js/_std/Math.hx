@@ -30,17 +30,17 @@ extern class Math
 
 	static var NEGATIVE_INFINITY(get, null) : Float;
 	@:pure private static inline function get_NEGATIVE_INFINITY () : Float {
-		return -(untyped __js__("Infinity"));
+		return -(js.Syntax.code("Infinity"));
 	}
 
 	static var POSITIVE_INFINITY(get,null) : Float;
 	@:pure private static inline function get_POSITIVE_INFINITY () : Float {
-		return (untyped __js__("Infinity"));
+		return (js.Syntax.code("Infinity"));
 	}
 
 	static var NaN(get, null) : Float;
 	@:pure private static inline function get_NaN () : Float {
-		return (untyped __js__("NaN"));
+		return (js.Syntax.code("NaN"));
 	}
 
 	@:pure static function abs(v:Float):Float;
@@ -75,11 +75,11 @@ extern class Math
 	}
 
 	@:pure static inline function isFinite( f : Float ) : Bool {
-		return (untyped __js__("isFinite"))(f);
+		return js.Syntax.code("isFinite({0})", f);
 	}
 
 	@:pure static inline function isNaN( f : Float ) : Bool {
-		return (untyped __js__("isNaN"))(f);
+		return js.Syntax.code("isNaN({0})", f);
 	}
 
 	static function __init__() : Void {

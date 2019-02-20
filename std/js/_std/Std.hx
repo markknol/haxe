@@ -43,8 +43,8 @@ import js.Boot;
 
 	@:pure
 	public static function parseInt( x : String ) : Null<Int> {
-		var v = untyped __js__('parseInt({0}, {0} && {0}[0]=="0" && ({0}[1]=="x" || {0}[1]=="X") ? 16 : 10)', x);
-		if( untyped __js__("isNaN")(v) )
+		var v = js.Syntax.code('parseInt({0}, {0} && {0}[0]=="0" && ({0}[1]=="x" || {0}[1]=="X") ? 16 : 10)', x);
+		if (js.Syntax.code("isNaN({0})", v) )
 			return null;
 		return cast v;
 	}

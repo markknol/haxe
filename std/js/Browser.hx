@@ -27,7 +27,7 @@ import js.html.XMLHttpRequest;
 class Browser {
 	/** The global window object. */
 	public static var window(get, never):js.html.Window;
-	extern inline static function get_window() return untyped __js__("window");
+	extern inline static function get_window() return js.Syntax.code("window");
 
 	/** Shortcut to Window.document. */
 	public static var document(get, never):js.html.HTMLDocument;
@@ -52,7 +52,7 @@ class Browser {
 	 * environment such as node.js.
 	 */
 	public static var supported(get, never):Bool;
-	extern inline static function get_supported() return js.Syntax.typeof(window) != "undefined";
+	extern inline static function get_supported() return js.Syntax.typeof(window) != js.Lib.undefined;
 
 	/**
 	 * Safely gets the browser's local storage, or returns null if localStorage is unsupported or
@@ -100,10 +100,10 @@ class Browser {
 	 */
 	public static function createXMLHttpRequest() : XMLHttpRequest
 	{
-		if( untyped __js__("typeof XMLHttpRequest") != "undefined" ) {
+		if( untyped __js__("typeof XMLHttpRequest") != js.Lib.undefined ) {
 			return new XMLHttpRequest();
 		}
-		if( untyped __js__("typeof ActiveXObject") != "undefined" ) {
+		if( untyped __js__("typeof ActiveXObject") != js.Lib.undefined ) {
 			return js.Syntax.construct("ActiveXObject","Microsoft.XMLHTTP");
 		}
 		throw "Unable to create XMLHttpRequest object.";

@@ -100,10 +100,10 @@ class Browser {
 	 */
 	public static function createXMLHttpRequest() : XMLHttpRequest
 	{
-		if( untyped __js__("typeof XMLHttpRequest") != js.Lib.undefined ) {
+		if( untyped __js__("typeof XMLHttpRequest") != "undefined" ) {
 			return new XMLHttpRequest();
 		}
-		if( untyped __js__("typeof ActiveXObject") != js.Lib.undefined ) {
+		if( untyped __js__("typeof ActiveXObject") != "undefined" ) {
 			return js.Syntax.construct("ActiveXObject","Microsoft.XMLHTTP");
 		}
 		throw "Unable to create XMLHttpRequest object.";

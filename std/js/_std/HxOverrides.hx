@@ -127,12 +127,16 @@ class HxOverrides {
 	}
 
 	@:pure
-	static function iter<T>( a : Array<T> ) : Iterator<T>  {
-		var cur = 0;
-		var arr = a;
-		return {
-			hasNext : () -> cur < arr.length,
-			next : () -> arr[cur++],
+	static function iter<T>( a : Array<T> ) : Iterator<T> {
+		return untyped {
+			cur : 0,
+			arr : a,
+			hasNext : function() {
+				return __this__.cur < __this__.arr.length;
+			},
+			next : function() {
+				return __this__.arr[__this__.cur++];
+			}
 		};
 	}
 

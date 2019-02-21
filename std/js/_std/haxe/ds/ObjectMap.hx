@@ -64,7 +64,7 @@ class ObjectMap<K:{ }, V> implements haxe.Constraints.IMap<K,V> {
 		var id = getId(key);
 		if ( untyped h.__keys__[id] == null ) return false;
 		js.Syntax.delete(h, id);
-		js.Syntax.delete(untyped h.__keys__, id);
+		js.Syntax.delete((cast h).__keys__, id);
 		return true;
 	}
 
@@ -79,11 +79,15 @@ class ObjectMap<K:{ }, V> implements haxe.Constraints.IMap<K,V> {
 	}
 
 	public function iterator() : Iterator<V> {
-		var it = keys();
-		var ref = h;
-		return {
-			hasNext: () -> it.hasNext(),
-			next: () -> untyped ref[getId(it.next())],
+		return untyped {
+			ref : h,
+			it : keys(),
+			hasNext : function() {
+				return __this__.it.hasNext();
+			},
+			next : function() {
+				return __this__.ref[getId(__this__.it.next())];
+			}
 		};
 	}
 

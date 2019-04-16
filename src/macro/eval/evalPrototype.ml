@@ -33,7 +33,7 @@ let eval_expr ctx kind e =
 	catch_exceptions ctx (fun () ->
 		let jit,f = jit_expr ctx e in
 		let num_captures = Hashtbl.length jit.captures in
-		let info = create_env_info true (file_hash e.epos.pfile) kind jit.capture_infos in
+		let info = create_env_info true e.epos.pfile kind jit.capture_infos in
 		let env = push_environment ctx info jit.max_num_locals num_captures in
 		Std.finally (fun _ -> pop_environment ctx env) f env
 	) e.Type.epos
@@ -170,7 +170,7 @@ module PrototypeBuilder = struct
 end
 
 let is_removable_field cf =
-	cf.cf_extern || Meta.has Meta.Generic cf.cf_meta
+	has_class_field_flag cf CfExtern || Meta.has Meta.Generic cf.cf_meta
 
 let is_persistent cf =
 	Meta.has (Meta.Custom ":persistent") cf.cf_meta

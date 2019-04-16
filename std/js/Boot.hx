@@ -161,13 +161,14 @@ class Boot {
 			return false;
 		if( cc == cl )
 			return true;
-		var intf : Dynamic = cc.__interfaces__;
-		if( intf != null )
+		if( js.Object.prototype.hasOwnProperty.call(cc, "__interfaces__") ) {
+			var intf : Dynamic = cc.__interfaces__;
 			for( i in 0...intf.length ) {
 				var i : Dynamic = intf[i];
 				if( i == cl || __interfLoop(i,cl) )
 					return true;
 			}
+		}
 		return __interfLoop(cc.__super__,cl);
 	}
 
@@ -184,7 +185,7 @@ class Boot {
 		case String:
 			return js.Syntax.typeof(o) == "string";
 		case Array:
-			return js.Syntax.instanceof(o, Array) && o.__enum__ == null;
+			return js.Syntax.instanceof(o, Array) #if js_enums_as_arrays && o.__enum__ == null #end;
 		case Dynamic:
 			return o != null;
 		default:
@@ -209,7 +210,7 @@ class Boot {
 			#if js_enums_as_arrays
 			return o.__enum__ == cl;
 			#else
-			return (untyped $hxEnums[o.__enum__]) == cl;
+			return if (o.__enum__ != null) (untyped $hxEnums[o.__enum__]) == cl else false;
 			#end
 		}
 	}

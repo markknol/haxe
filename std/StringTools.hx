@@ -115,7 +115,7 @@ class StringTools {
 			return untyped s.__URLDecode();
 		#elseif java
 			try
-				return untyped __java__("java.net.URLDecoder.decode(s, \"UTF-8\")")
+				return java.net.URLDecoder.decode(s, "UTF-8")
 			catch (e:Dynamic) throw e;
 		#elseif cs
 			return untyped cs.system.Uri.UnescapeDataString(s);
@@ -184,6 +184,15 @@ class StringTools {
 	}
 
 	/**
+		Returns `true` if `s` contains `value` and  `false` otherwise.
+
+		When `value` is `null`, the result is unspecified.
+	**/
+	public static inline function contains(s : String, value : String) : Bool {
+		return s.indexOf(value) != -1;
+	}
+
+	/**
 		Tells if the string `s` starts with the string `start`.
 
 		If `start` is `null`, the result is unspecified.
@@ -192,7 +201,7 @@ class StringTools {
 	**/
 	public static #if (cs || java || python) inline #end function startsWith( s : String, start : String ) : Bool {
 		#if java
-		return untyped s.startsWith(start);
+		return (cast s : java.NativeString).startsWith(start);
 		#elseif cs
 		return untyped s.StartsWith(start);
 		#elseif cpp
@@ -209,7 +218,7 @@ class StringTools {
 		#elseif python
 		return python.NativeStringTools.startswith(s, start);
 		#else
-		return( s.length >= start.length && s.substr(0, start.length) == start );
+		return( s.length >= start.length && s.lastIndexOf(start, 0) == 0 );
 		#end
 	}
 
@@ -222,7 +231,7 @@ class StringTools {
 	**/
 	public static #if (cs || java || python) inline #end function endsWith( s : String, end : String ) : Bool {
 		#if java
-		return untyped s.endsWith(end);
+		return (cast s : java.NativeString).endsWith(end);
 		#elseif cs
 		return untyped s.EndsWith(end);
 		#elseif cpp
@@ -243,7 +252,7 @@ class StringTools {
 		#else
 		var elen = end.length;
 		var slen = s.length;
-		return( slen >= elen && s.substr(slen - elen, elen) == end );
+		return( slen >= elen && s.indexOf(end, (slen - elen)) == (slen - elen) );
 		#end
 	}
 
@@ -394,7 +403,7 @@ class StringTools {
 		if (sub.length == 0)
 			return s.split(sub).join(by);
 		else
-			return untyped s.replace(sub, by);
+			return (cast s : java.NativeString).replace(sub, by);
 		#elseif cs
 		if (sub.length == 0)
 			return s.split(sub).join(by);
@@ -471,7 +480,11 @@ class StringTools {
 		#elseif hl
 		return @:privateAccess s.bytes.getUI16(index << 1);
 		#elseif lua
-		return lua.lib.luautf8.Utf8.byte(s,index+1);
+			#if lua_vanilla
+			return lua.NativeStringTools.byte(s,index+1);
+			#else
+			return lua.lib.luautf8.Utf8.byte(s,index+1);
+			#end
 		#else
 		return untyped s.cca(index);
 		#end
@@ -503,6 +516,7 @@ class StringTools {
 		on Unix.
 		The input will be quoted, or escaped if necessary.
 	**/
+	@:noCompletion
 	public static function quoteUnixArg(argument:String):String {
 		// Based on cpython's shlex.quote().
 		// https://hg.python.org/cpython/file/a3f076d4f54f/Lib/shlex.py#l278
@@ -521,6 +535,7 @@ class StringTools {
 	/**
 		Character codes of the characters that will be escaped by `quoteWinArg(_, true)`.
 	**/
+	@:noCompletion
 	public static var winMetaCharacters = [" ".code, "(".code, ")".code, "%".code, "!".code, "^".code, "\"".code, "<".code, ">".code, "&".code, "|".code, "\n".code, "\r".code, ",".code, ";".code];
 
 	/**
@@ -536,6 +551,7 @@ class StringTools {
 		quoteWinArg("ab c") == '"ab c"';
 		```
 	**/
+	@:noCompletion
 	public static function quoteWinArg(argument:String, escapeMetaCharacters:Bool):String {
 		// If there is no space, tab, back-slash, or double-quotes, and it is not an empty string.
 		if (!~/^[^ \t\\"]+$/.match(argument)) {
@@ -599,7 +615,7 @@ class StringTools {
 	}
 
 	#if java
-	private static inline function _charAt(str:String, idx:Int):java.StdTypes.Char16 return untyped str._charAt(idx);
+	private static inline function _charAt(str:String, idx:Int):java.StdTypes.Char16 return (cast str : java.NativeString).charAt(idx);
 	#end
 
 	#if neko

@@ -132,7 +132,6 @@ let make_call_ref : (typer -> texpr -> texpr list -> t -> ?force_inline:bool -> 
 let type_expr_ref : (typer -> expr -> WithType.t -> texpr) ref = ref (fun _ _ _ -> assert false)
 let type_block_ref : (typer -> expr list -> WithType.t -> pos -> texpr) ref = ref (fun _ _ _ _ -> assert false)
 let unify_min_ref : (typer -> texpr list -> t) ref = ref (fun _ _ -> assert false)
-let get_pattern_locals_ref : (typer -> expr -> Type.t -> (string, tvar * pos) PMap.t) ref = ref (fun _ _ _ -> assert false)
 let analyzer_run_on_expr_ref : (Common.context -> texpr -> texpr) ref = ref (fun _ _ -> assert false)
 
 let pass_name = function
@@ -145,7 +144,7 @@ let pass_name = function
 
 let display_error ctx msg p = match ctx.com.display.DisplayMode.dms_error_policy with
 	| DisplayMode.EPShow | DisplayMode.EPIgnore -> ctx.on_error ctx msg p
-	| DisplayMode.EPCollect -> add_diagnostics_message ctx.com msg p DisplayTypes.DiagnosticsSeverity.Error
+	| DisplayMode.EPCollect -> add_diagnostics_message ctx.com msg p DisplayTypes.DiagnosticsKind.DKCompilerError DisplayTypes.DiagnosticsSeverity.Error
 
 let make_call ctx e el t p = (!make_call_ref) ctx e el t p
 
@@ -308,7 +307,7 @@ let push_this ctx e = match e.eexpr with
 		er,fun () -> ctx.this_stack <- List.tl ctx.this_stack
 
 let is_removable_field ctx f =
-	f.cf_extern || Meta.has Meta.Generic f.cf_meta
+	has_class_field_flag f CfExtern || Meta.has Meta.Generic f.cf_meta
 	|| (match f.cf_kind with
 		| Var {v_read = AccRequire (s,_)} -> true
 		| Method MethMacro -> not ctx.in_macro
@@ -316,7 +315,7 @@ let is_removable_field ctx f =
 
 (** checks if we can access to a given class field using current context *)
 let rec can_access ctx ?(in_overload=false) c cf stat =
-	if cf.cf_public then
+	if (has_class_field_flag cf CfPublic) then
 		true
 	else if not in_overload && ctx.com.config.pf_overload && Meta.has Meta.Overload cf.cf_meta then
 		true
@@ -430,7 +429,7 @@ let merge_core_doc ctx mt =
 			| Some ({cf_doc = None} as cf),Some cf2 -> cf.cf_doc <- cf2.cf_doc
 			| _ -> ()
 		end
-	| _ -> ());
+	| _ -> ())
 
 (* -------------- debug functions to activate when debugging typer passes ------------------------------- *)
 (*/*
@@ -446,7 +445,12 @@ let context_ident ctx =
 		"  out "
 
 let debug ctx str =
-	if Common.raw_defined ctx.com "cdebug" then print_endline (context_ident ctx ^ string_of_int (String.length !delay_tabs) ^ " " ^ !delay_tabs ^ str)
+	if Common.raw_defined ctx.com "cdebug" then begin
+		let s = (context_ident ctx ^ string_of_int (String.length !delay_tabs) ^ " " ^ !delay_tabs ^ str) in
+		match ctx.com.json_out with
+		| None -> print_endline s
+		| Some _ -> DynArray.add ctx.com.pass_debug_messages s
+	end
 
 let init_class_done ctx =
 	debug ctx ("init_class_done " ^ s_type_path ctx.curclass.cl_path);

@@ -22,6 +22,8 @@
 package php;
 
 import haxe.PosInfos;
+import haxe.iterators.StringIterator;
+import haxe.iterators.StringKeyValueIterator;
 import haxe.extern.EitherType;
 
 using php.Global;
@@ -194,6 +196,13 @@ class Boot {
 	}
 
 	/**
+		Check if provided value is an anonymous object
+	**/
+	public static inline function isAnon(v:Any) : Bool {
+		return Std.is(v, HxAnon);
+	}
+
+	/**
 		Returns Class<HxClass>
 	**/
 	public static inline function getHxClass() : HxClass {
@@ -325,7 +334,10 @@ class Boot {
 	/**
 		Returns string representation of `value`
 	**/
-	public static function stringify( value : Dynamic ) : String {
+	public static function stringify( value : Dynamic, maxRecursion:Int = 10 ) : String {
+		if(maxRecursion <= 0) {
+			return '<...>';
+		}
 		if (value == null) {
 			return 'null';
 		}
@@ -341,11 +353,14 @@ class Boot {
 		if (value.is_array()) {
 			var strings = Syntax.arrayDecl();
 			Syntax.foreach(value, function(key:Dynamic, item:Dynamic) {
-				Global.array_push(strings, (key:String) + ' => ' + stringify(item));
+				strings.push(Syntax.string(key) + ' => ' + stringify(item, maxRecursion - 1));
 			});
 			return '[' + Global.implode(', ', strings) + ']';
 		}
 		if (value.is_object()) {
+			if(Std.is(value, Array)) {
+				return inline stringifyNativeIndexedArray(value.arr, maxRecursion - 1);
+			}
 			if (value.method_exists('toString')) {
 				return value.toString();
 			}
@@ -359,7 +374,7 @@ class Boot {
 				var result = new NativeIndexedArray<String>();
 				var data = Global.get_object_vars(value);
 				for (key in data.array_keys()) {
-					result.array_push('$key : ' + stringify(data[key]));
+					result.array_push('$key : ' + stringify(data[key], maxRecursion - 1));
 				}
 				return '{ ' + Global.implode(', ', result) + ' }';
 			}
@@ -373,6 +388,14 @@ class Boot {
 			}
 		}
 		throw "Unable to stringify value";
+	}
+
+	static public function stringifyNativeIndexedArray<T>( arr : NativeIndexedArray<T>, maxRecursion : Int = 10 ) : String {
+		var strings = Syntax.arrayDecl();
+		Syntax.foreach(arr, function(index:Int, value:T) {
+			strings[index] = Boot.stringify(value, maxRecursion - 1);
+		});
+		return '[' + Global.implode(',', strings) + ']';
 	}
 
 	static public inline function isNumber( value:Dynamic ) {
@@ -410,6 +433,13 @@ class Boot {
 		if (type == null) return false;
 
 		var phpType = type.phpClassName;
+		#if php_prefix
+			var prefix = getPrefix();
+			if(Global.substr(phpType, 0, Global.strlen(prefix) + 1) == '$prefix\\') {
+				phpType = Global.substr(phpType, Global.strlen(prefix) + 1);
+			}
+		#end
+
 		switch (phpType) {
 			case 'Dynamic':
 				return value != null;
@@ -431,7 +461,7 @@ class Boot {
 				return value.is_string();
 			case 'php\\NativeArray', 'php\\_NativeArray\\NativeArray_Impl_':
 				return value.is_array();
-			case 'Enum', 'Class':
+			case 'Enum' | 'Class':
 				if (Std.is(value, HxClass)) {
 					var valuePhpClass = (cast value:HxClass).phpClassName;
 					var enumPhpClass = (cast HxEnum:HxClass).phpClassName;
@@ -482,7 +512,7 @@ class Boot {
 		if (right == 0) {
 			return left;
 		} else if (left >= 0) {
-			return ((left >> right) & ~(1 << ( 8*Const.PHP_INT_SIZE-1 ) >> (right-1)));
+			return (left >> right) & ~( (1 << (8 * Const.PHP_INT_SIZE - 1)) >> (right - 1) );
 		} else {
 			return (left >> right) & (0x7fffffff >> (right - 1));
 		}
@@ -708,6 +738,14 @@ private class HxString {
 		return char == '' ? null : Boot.unsafeOrd(char);
 	}
 
+	public static function iterator( str:String ):StringIterator {
+		return new StringIterator(str);
+	}
+
+	public static function keyValueIterator( str:String ):StringKeyValueIterator {
+		return new StringKeyValueIterator(str);
+	}
+
 	public static function indexOf( str:String, search:String, startIndex:Int = null ) : Int {
 		if (startIndex == null) {
 			startIndex = 0;
@@ -897,9 +935,7 @@ private class HxAnon extends StdClass {
 
 	@:phpMagic
 	function __call( name:String, args:NativeArray ) : Dynamic {
-		var method = Syntax.field(this, name);
-		Syntax.keepVar(method);
-		return method(Syntax.splat(args));
+		return Syntax.code("($this->{0})(...{1})", name, args);
 	}
 }
 

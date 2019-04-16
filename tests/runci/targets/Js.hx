@@ -48,7 +48,7 @@ class Js {
 				}
 				FileSystem.rename("bin/unit.js", output);
 				FileSystem.rename("bin/unit.js.map", output + ".map");
-				runCommand("node", ["-e", "require('./" + output + "').unit.TestMain.nodejsMain();"]);
+				runCommand("node", ["-e", "require('./" + output + "').unit.TestMain.main();"]);
 				output;
 			}
 		];
@@ -57,7 +57,7 @@ class Js {
 		changeDirectory(miscDir + "es6");
 		runCommand("haxe", ["run.hxml"]);
 
-		haxelibInstall("hxnodejs");
+		haxelibInstallGit("HaxeFoundation", "hxnodejs");
 		var env = Sys.environment();
 		if (
 			env.exists("SAUCE") &&
@@ -93,9 +93,9 @@ class Js {
 		infoMsg("Test optimization:");
 		changeDirectory(optDir);
 		runCommand("haxe", ["run.hxml"]);
-		haxelibInstall("utest");
 
 		runci.targets.Java.getJavaDependencies(); // this is awkward
+		haxelibInstallGit("Simn", "haxeserver");
 		changeDirectory(serverDir);
 		runCommand("haxe", ["build.hxml"]);
 		runCommand("node", ["test.js"]);

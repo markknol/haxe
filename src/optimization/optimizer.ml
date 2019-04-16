@@ -407,7 +407,7 @@ let inline_constructors ctx e =
 		if i < 0 then "n" ^ (string_of_int (-i))
 		else (string_of_int i)
 	in
-	let is_extern_ctor c cf = c.cl_extern || cf.cf_extern in
+	let is_extern_ctor c cf = c.cl_extern || has_class_field_flag cf CfExtern in
 	let rec find_locals e = match e.eexpr with
 		| TVar(v,Some e1) ->
 			find_locals e1;
@@ -645,7 +645,7 @@ let optimize_completion_expr e args =
 			let el = List.fold_left (fun acc e ->
 				typing_side_effect := false;
 				let e = loop e in
-				if !typing_side_effect || DisplayPosition.encloses_display_position (pos e) then begin told := true; e :: acc end else acc
+				if !typing_side_effect || DisplayPosition.display_position#enclosed_in (pos e) then begin told := true; e :: acc end else acc
 			) [] el in
 			old();
 			typing_side_effect := !told;
@@ -660,26 +660,47 @@ let optimize_completion_expr e args =
 			let e = map e in
 			old();
 			e
-		| EFor ((EBinop (OpIn,((EConst (Ident n),_) as id),it),p),efor) ->
-			let it = loop it in
-			let old = save() in
-			let etmp = (EConst (Ident "$tmp"),p) in
-			decl n None (Some (EBlock [
-				(EVars [("$tmp",null_pos),false,None,None],p);
-				(EFor ((EBinop (OpIn,id,it),p),(EBinop (OpAssign,etmp,(EConst (Ident n),p)),p)),p);
-				etmp
-			],p));
-			let efor = loop efor in
-			old();
-			(EFor ((EBinop (OpIn,id,it),p),efor),p)
+		| EFor (header,body) ->
+			let idents = ref []
+			and has_in = ref false in
+			let rec collect_idents e =
+				match e with
+					| EConst (Ident name), p ->
+						idents := (name,p) :: !idents;
+						e
+					| EBinop (OpIn, e, it), p ->
+						has_in := true;
+						(EBinop (OpIn, collect_idents e, loop it), p)
+					| _ ->
+						Ast.map_expr collect_idents e
+			in
+			let header = collect_idents header in
+			(match !idents,!has_in with
+				| [],_ | _,false -> map e
+				| idents,true ->
+					let old = save() in
+					List.iter
+						(fun (name, pos) ->
+							let etmp = (EConst (Ident "$tmp"),pos) in
+							decl name None (Some (EBlock [
+								(EVars [("$tmp",null_pos),false,None,None],p);
+								(EFor(header,(EBinop (OpAssign,etmp,(EConst (Ident name),p)),p)), p);
+								etmp
+							],p));
+						)
+						idents;
+					let body = loop body in
+					old();
+					(EFor(header,body),p)
+			)
 		| EReturn _ ->
 			typing_side_effect := true;
 			map e
-		| ESwitch (e1,cases,def) when DisplayPosition.encloses_display_position p ->
+		| ESwitch (e1,cases,def) when DisplayPosition.display_position#enclosed_in p ->
 			let e1 = loop e1 in
 			hunt_idents e1;
 			(* Prune all cases that aren't our display case *)
-			let cases = List.filter (fun (_,_,_,p) -> DisplayPosition.encloses_display_position p) cases in
+			let cases = List.filter (fun (_,_,_,p) -> DisplayPosition.display_position#enclosed_in p) cases in
 			(* Don't throw away the switch subject when we optimize in a case expression because we might need it *)
 			let cases = List.map (fun (el,eg,eo,p) ->
 				List.iter hunt_idents el;
@@ -720,10 +741,10 @@ let optimize_completion_expr e args =
 				(n,pn), (t,pt), e, p
 			) cl in
 			(ETry (et,cl),p)
-		| ECall(e1,el) when DisplayPosition.encloses_display_position p ->
+		| ECall(e1,el) when DisplayPosition.display_position#enclosed_in p ->
 			let e1 = loop e1 in
 			let el = List.map (fun e ->
-				if DisplayPosition.encloses_display_position (pos e) then
+				if DisplayPosition.display_position#enclosed_in (pos e) then
 					(try loop e with Return e -> e)
 				else
 					(EConst (Ident "null"),(pos e))

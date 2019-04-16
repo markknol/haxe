@@ -63,6 +63,31 @@ class ServerTests extends HaxeServerTestCase {
 		runHaxe(args, true);
 		assertHasField("", "Type", "enumIndex", true);
 	}
+
+	function testBuildMacro() {
+		vfs.putContent("BuildMacro.hx", getTemplate("BuildMacro.hx"));
+		vfs.putContent("BuiltClass.hx", getTemplate("BuiltClass.hx"));
+		var args = ["-main", "BuiltClass.hx", "--interp"];
+		runHaxe(args);
+		runHaxe(args);
+		assertReuse("BuiltClass");
+		vfs.touchFile("BuildMacro.hx");
+		runHaxe(args);
+		assertNotCacheModified("BuildMacro");
+		assertSkipping("BuiltClass", "BuildMacro");
+		assertSkipping("BuildMacro");
+	}
+
+	function testBrokenSyntaxDiagnostics() {
+		vfs.putContent("BrokenSyntax.hx", getTemplate("BrokenSyntax.hx"));
+		vfs.putContent("Empty.hx", getTemplate("Empty.hx"));
+		var args = ["-main", "BrokenSyntax.hx", "--interp", "--no-output"];
+		runHaxe(args);
+		assertErrorMessage("Expected }");
+		runHaxe(args.concat(["--display", "Empty.hx@0@diagnostics"]));
+		runHaxe(args);
+		assertErrorMessage("Expected }");
+	}
 }
 
 class Main {

@@ -98,6 +98,10 @@ type platform_config = {
 	pf_supports_function_equality : bool;
 	(** uses utf16 encoding with ucs2 api **)
 	pf_uses_utf16 : bool;
+	(** target supports accessing `this` before calling `super(...)` **)
+	pf_this_before_super : bool;
+	(** target supports threads **)
+	pf_supports_threads : bool;
 }
 
 class compiler_callbacks = object(self)
@@ -141,7 +145,7 @@ end
 
 type shared_display_information = {
 	mutable import_positions : (pos,bool ref * placed_name list) PMap.t;
-	mutable diagnostics_messages : (string * pos * DisplayTypes.DiagnosticsSeverity.t) list;
+	mutable diagnostics_messages : (string * pos * DisplayTypes.DiagnosticsKind.t * DisplayTypes.DiagnosticsSeverity.t) list;
 }
 
 type display_information = {
@@ -182,8 +186,9 @@ type context = {
 	file_lookup_cache : (string,string option) Hashtbl.t;
 	parser_cache : (string,(type_def * pos) list) Hashtbl.t;
 	module_to_file : (path,string) Hashtbl.t;
-	cached_macros : (path * string,((string * bool * t) list * t * tclass * Type.tclass_field)) Hashtbl.t;
+	cached_macros : (path * string,(((string * bool * t) list * t * tclass * Type.tclass_field) * module_def)) Hashtbl.t;
 	mutable stored_typed_exprs : (int, texpr) PMap.t;
+	pass_debug_messages : string DynArray.t;
 	(* output *)
 	mutable file : string;
 	mutable flash_version : float;
@@ -239,6 +244,9 @@ let define_value com k v =
 let raw_defined_value com k =
 	Define.raw_defined_value com.defines k
 
+let get_es_version com =
+	try int_of_string (defined_value com Define.JsEs) with _ -> 0
+
 let short_platform_name = function
 	| Cross -> "x"
 	| Js -> "js"
@@ -273,6 +281,8 @@ let default_config =
 		pf_reserved_type_paths = [];
 		pf_supports_function_equality = true;
 		pf_uses_utf16 = true;
+		pf_this_before_super = true;
+		pf_supports_threads = false;
 	}
 
 let get_config com =
@@ -287,6 +297,7 @@ let get_config com =
 			pf_sys = false;
 			pf_capture_policy = CPLoopVars;
 			pf_reserved_type_paths = [([],"Object");([],"Error")];
+			pf_this_before_super = (get_es_version com) < 6; (* cannot access `this` before `super()` when generating ES6 classes *)
 		}
 	| Lua ->
 		{
@@ -301,6 +312,7 @@ let get_config com =
 			pf_static = false;
 			pf_pad_nulls = true;
 			pf_uses_utf16 = false;
+			pf_supports_threads = true;
 		}
 	| Flash when defined Define.As3 ->
 		{
@@ -330,6 +342,7 @@ let get_config com =
 			pf_capture_policy = CPWrapRef;
 			pf_pad_nulls = true;
 			pf_add_final_return = true;
+			pf_supports_threads = true;
 		}
 	| Cs ->
 		{
@@ -344,6 +357,7 @@ let get_config com =
 			pf_capture_policy = CPWrapRef;
 			pf_pad_nulls = true;
 			pf_overload = true;
+			pf_supports_threads = true;
 		}
 	| Python ->
 		{
@@ -357,6 +371,7 @@ let get_config com =
 			default_config with
 			pf_capture_policy = CPWrapRef;
 			pf_pad_nulls = true;
+			pf_supports_threads = true;
 		}
 	| Eval ->
 		{
@@ -364,6 +379,8 @@ let get_config com =
 			pf_static = false;
 			pf_pad_nulls = true;
 			pf_uses_utf16 = false;
+			pf_supports_threads = true;
+			pf_capture_policy = CPWrapRef;
 		}
 
 let memory_marker = [|Unix.time()|]
@@ -426,6 +443,7 @@ let create version s_version args =
 		get_macros = (fun() -> None);
 		warning = (fun _ _ -> assert false);
 		error = (fun _ _ -> assert false);
+		pass_debug_messages = DynArray.create();
 		basic = {
 			tvoid = m;
 			tint = m;
@@ -507,9 +525,23 @@ let init_platform com pf =
 	let forbid acc p = if p = name || PMap.mem p acc then acc else PMap.add p Forbidden acc in
 	com.package_rules <- List.fold_left forbid com.package_rules (List.map platform_name platforms);
 	com.config <- get_config com;
-	if com.config.pf_static then define com Define.Static;
-	if com.config.pf_sys then define com Define.Sys else com.package_rules <- PMap.add "sys" Forbidden com.package_rules;
-	if com.config.pf_uses_utf16 then define com Define.Utf16;
+	if com.config.pf_static then begin
+		raw_define_value com.defines "target.static" "true";
+		define com Define.Static;
+	end;
+	if com.config.pf_sys then begin
+		raw_define_value com.defines "target.sys" "true";
+		define com Define.Sys
+	end else
+		com.package_rules <- PMap.add "sys" Forbidden com.package_rules;
+	if com.config.pf_uses_utf16 then begin
+		raw_define_value com.defines "target.utf16" "true";
+		define com Define.Utf16;
+	end;
+	if com.config.pf_supports_threads then begin
+		raw_define_value com.defines "target.threaded" "true";
+	end;
+	raw_define_value com.defines "target.name" name;
 	raw_define com name
 
 let add_feature com f =
@@ -696,9 +728,9 @@ let utf16_to_utf8 str =
 	loop 0;
 	Buffer.contents b
 
-let add_diagnostics_message com s p sev =
+let add_diagnostics_message com s p kind sev =
 	let di = com.shared.shared_display_information in
-	di.diagnostics_messages <- (s,p,sev) :: di.diagnostics_messages
+	di.diagnostics_messages <- (s,p,kind,sev) :: di.diagnostics_messages
 
 open Printer
 

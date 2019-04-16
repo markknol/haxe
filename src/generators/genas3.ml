@@ -231,6 +231,18 @@ let open_block ctx =
 	ctx.tabs <- "\t" ^ ctx.tabs;
 	(fun() -> ctx.tabs <- oldt)
 
+(**
+	Returns `true` is `expr` represent a constant string.
+	Recursively looks through casts, metas and parentheses.
+*)
+let rec is_const_string expr =
+	match expr.eexpr with
+		| TConst (TString _) -> true
+		| TCast (e, _) -> is_const_string e
+		| TMeta (_, e) -> is_const_string e
+		| TParenthesis e -> is_const_string e
+		| _ -> false
+
 let parent e =
 	match e.eexpr with
 	| TParenthesis _ -> e
@@ -699,6 +711,14 @@ and gen_expr ctx e =
 		gen_expr ctx f.tf_expr;
 		ctx.in_static <- old;
 		h();
+	| TCall ({ eexpr = TField (e, ((FDynamic "iterator") | (FAnon { cf_name = "iterator" }))) }, []) when is_const_string e ->
+		print ctx "new haxe.iterators.StringIterator(";
+		gen_value ctx e;
+		print ctx ")"
+	| TCall ({ eexpr = TField (e, ((FDynamic "keyValueIterator") | (FAnon { cf_name = "keyValueIterator" }))) }, []) when is_const_string e ->
+		print ctx "new haxe.iterators.StringKeyValueIterator(";
+		gen_value ctx e;
+		print ctx ")"
 	| TCall (v,el) ->
 		gen_call ctx v el e.etype
 	| TArrayDecl el ->
@@ -996,16 +1016,19 @@ let generate_field ctx static f =
 			print ctx "]";
 		| _ -> ()
 	) f.cf_meta;
-	let public = f.cf_public || Hashtbl.mem ctx.get_sets (f.cf_name,static) || (f.cf_name = "main" && static)
+	let cfl_overridden = TClass.get_overridden_fields ctx.curclass f in
+	let overrides_public = List.exists (fun cf -> Meta.has Meta.Public cf.cf_meta) cfl_overridden in
+	let public = (has_class_field_flag f CfPublic) || Hashtbl.mem ctx.get_sets (f.cf_name,static) || (f.cf_name = "main" && static)
 		|| f.cf_name = "resolve" || Meta.has Meta.Public f.cf_meta
 		(* consider all abstract methods public to avoid issues with inlined private access *)
 	    || (match ctx.curclass.cl_kind with KAbstractImpl _ -> true | _ -> false)
+		|| overrides_public
 	in
 	let rights = (if static then "static " else "") ^ (if public then "public" else "protected") in
 	let p = ctx.curclass.cl_pos in
 	match f.cf_expr, f.cf_kind with
 	| Some { eexpr = TFunction fd }, Method (MethNormal | MethInline) ->
-		print ctx "%s%s " rights (if static || not f.cf_final then "" else " final ");
+		print ctx "%s%s " rights (if static || not (has_class_field_flag f CfFinal) then "" else " final ");
 		let rec loop c =
 			match c.cl_super with
 			| None -> ()
@@ -1114,7 +1137,7 @@ let generate_class ctx c =
 	| Some f ->
 		let f = { f with
 			cf_name = snd c.cl_path;
-			cf_public = true;
+			cf_flags = set_flag f.cf_flags (int_of_class_field_flag CfPublic);
 			cf_kind = Method MethNormal;
 		} in
 		ctx.constructor_block <- true;

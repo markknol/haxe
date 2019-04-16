@@ -30,7 +30,7 @@ import haxe.macro.Expr;
 #end
 class Compiler {
 	/**
-		A conditional compiler flag can be set command line using
+		A conditional compilation flag can be set on the command line using
 		`-D key=value`.
 
 		Returns the value of a compiler flag.
@@ -41,9 +41,12 @@ class Compiler {
 		If the compiler flag is not defined, `Compiler.getDefine` returns
 		`null`.
 
+		Note: This is a macro and cannot be called from within other macros. Refer
+		to `haxe.macro.Context.definedValue` to obtain defined values in macro context.
+
 		@see https://haxe.org/manual/lf-condition-compilation.html
 	**/
-	macro static public function getDefine( key : String ) {
+	macro /* <-- ! */ static public function getDefine( key : String ) {
 		return macro $v{haxe.macro.Context.definedValue(key)};
 	}
 
@@ -491,7 +494,7 @@ enum abstract NullSafetyMode(String) to String {
 		Loose safety.
 		If an expression is checked ` != null`, then it's considered safe even if it could be modified after the check.
 		E.g.
-		```
+		```haxe
 		function example(o:{field:Null<String>}) {
 			if(o.field != null) {
 				mutate(o);

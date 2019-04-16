@@ -64,6 +64,9 @@
 /tests/unit/unit.n
 /tests/unit/node_modules/
 
+/tests/nullsafety/bin
+/tests/nullsafety/dump
+
 /haxe.sublime*
 .idea
 build.bat
@@ -117,3 +120,6 @@ tests/sourcemaps/bin
 /*_plugin.ml
 tests/benchs/export/
 tests/benchs/dump/
+tests/display/.unittest/
+tests/unit/.unittest/
+tests/threads/export/

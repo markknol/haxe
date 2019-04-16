@@ -164,10 +164,10 @@ let ensure_struct_init_constructor ctx c ast_fields p =
 				let opt = has_default_expr || (Meta.has Meta.Optional cf.cf_meta) in
 				let t = if opt then ctx.t.tnull cf.cf_type else cf.cf_type in
 				let v = alloc_var VGenerated cf.cf_name t p in
-				let ef = mk (TField(ethis,FInstance(c,params,cf))) t p in
+				let ef = mk (TField(ethis,FInstance(c,params,cf))) cf.cf_type p in
 				let ev = mk (TLocal v) v.v_type p in
 				(* this.field = <constructor_argument> *)
-				let assign_expr = mk (TBinop(OpAssign,ef,ev)) ev.etype p in
+				let assign_expr = mk (TBinop(OpAssign,ef,ev)) cf.cf_type p in
 				let e =
 					if has_default_expr then
 						begin
@@ -492,7 +492,7 @@ let create_field_context (ctx,cctx) c cff =
 		is_macro = is_macro;
 		is_extern = !is_extern;
 		is_final = !is_final;
-		is_display_field = ctx.is_display_file && DisplayPosition.encloses_display_position cff.cff_pos;
+		is_display_field = ctx.is_display_file && DisplayPosition.display_position#enclosed_in cff.cff_pos;
 		is_field_debug = cctx.is_class_debug || Meta.has (Meta.Custom ":debug.typeload") cff.cff_meta;
 		display_modifier = display_modifier;
 		is_abstract_member = cctx.abstract <> None && Meta.has Meta.Impl cff.cff_meta;
@@ -511,7 +511,7 @@ let is_public (ctx,cctx) access parent =
 	else if List.mem_assoc APublic access then
 		true
 	else match parent with
-		| Some { cf_public = p } -> p
+		| Some cf -> (has_class_field_flag cf CfPublic)
 		| _ -> c.cl_extern || c.cl_interface || cctx.extends_public
 
 let rec get_parent c name =
@@ -796,14 +796,13 @@ let create_variable (ctx,cctx,fctx) c f t eo p =
 		{ v_read = AccNormal ; v_write = AccNormal }
 	in
 	let cf = {
-		(mk_field (fst f.cff_name) t f.cff_pos (pos f.cff_name)) with
+		(mk_field (fst f.cff_name) ~public:(is_public (ctx,cctx) f.cff_access None) t f.cff_pos (pos f.cff_name)) with
 		cf_doc = f.cff_doc;
 		cf_meta = f.cff_meta;
 		cf_kind = Var kind;
-		cf_public = is_public (ctx,cctx) f.cff_access None;
-		cf_extern = fctx.is_extern;
-		cf_final = fctx.is_final;
 	} in
+	if fctx.is_final then add_class_field_flag cf CfFinal;
+	if fctx.is_extern then add_class_field_flag cf CfExtern;
 	ctx.curfield <- cf;
 	bind_var (ctx,cctx,fctx) cf eo;
 	cf
@@ -1008,7 +1007,7 @@ let create_method (ctx,cctx,fctx) c f fd p =
 			let t, ct = TypeloadFunction.type_function_arg ctx (type_opt (ctx,cctx) p t) ct opt p in
 			delay ctx PTypeField (fun() -> match follow t with
 				| TAbstract({a_path = ["haxe";"extern"],"Rest"},_) ->
-					if not c.cl_extern then error "Rest argument are only supported for extern methods" p;
+					if not fctx.is_extern && not c.cl_extern then error "Rest argument are only supported for extern methods" p;
 					if opt then error "Rest argument cannot be optional" p;
 					begin match ct with None -> () | Some (_,p) -> error "Rest argument cannot have default value" p end;
 					if args <> [] then error "Rest should only be used for the last function argument" p;
@@ -1022,19 +1021,26 @@ let create_method (ctx,cctx,fctx) c f fd p =
 	let args = loop fd.f_args in
 	let t = TFun (fun_args args,ret) in
 	let cf = {
-		(mk_field (fst f.cff_name) t f.cff_pos (pos f.cff_name)) with
+		(mk_field (fst f.cff_name) ~public:(is_public (ctx,cctx) f.cff_access parent) t f.cff_pos (pos f.cff_name)) with
 		cf_doc = f.cff_doc;
 		cf_meta = f.cff_meta;
 		cf_kind = Method (if fctx.is_macro then MethMacro else if fctx.is_inline then MethInline else if dynamic then MethDynamic else MethNormal);
-		cf_public = is_public (ctx,cctx) f.cff_access parent;
 		cf_params = params;
-		cf_extern = fctx.is_extern;
-		cf_final = fctx.is_final;
 	} in
+	if fctx.is_final then add_class_field_flag cf CfFinal;
+	if fctx.is_extern then add_class_field_flag cf CfExtern;
 	cf.cf_meta <- List.map (fun (m,el,p) -> match m,el with
 		| Meta.AstSource,[] -> (m,(match fd.f_expr with None -> [] | Some e -> [e]),p)
 		| _ -> m,el,p
 	) cf.cf_meta;
+	Option.may (fun cf_parent ->
+		if not (Meta.has Meta.Native cf.cf_meta) then
+			try
+				let native_meta = Meta.get Meta.Native cf_parent.cf_meta in
+				cf.cf_meta <- native_meta :: cf.cf_meta;
+			with Not_found ->
+				()
+	) parent;
 	generate_value_meta ctx.com (Some c) (fun meta -> cf.cf_meta <- meta :: cf.cf_meta) fd.f_args;
 	check_abstract (ctx,cctx,fctx) c cf fd t ret p;
 	init_meta_overloads ctx (Some c) cf;
@@ -1099,7 +1105,7 @@ let create_method (ctx,cctx,fctx) c f fd p =
 				else
 					ignore(TypeloadFunction.process_function_arg ctx n t ct fctx.is_display_field pn)
 				end;
-				if fctx.is_display_field && DisplayPosition.encloses_display_position pn then begin
+				if fctx.is_display_field && DisplayPosition.display_position#enclosed_in pn then begin
 					let v = add_local_with_origin ctx TVOArgument n t pn in
 					DisplayEmitter.display_variable ctx v pn;
 				end
@@ -1207,7 +1213,7 @@ let create_property (ctx,cctx,fctx) c f (get,set,t,eo) p =
 		| "default",_ -> AccNormal
 		| "get",pget ->
 			let get = "get_" ^ name in
-			if fctx.is_display_field && DisplayPosition.encloses_display_position pget then delay ctx PTypeField (fun () -> display_accessor get pget);
+			if fctx.is_display_field && DisplayPosition.display_position#enclosed_in pget then delay ctx PTypeField (fun () -> display_accessor get pget);
 			if not cctx.is_lib then delay_check (fun() -> check_method get t_get);
 			AccCall
 		| _,pget ->
@@ -1226,7 +1232,7 @@ let create_property (ctx,cctx,fctx) c f (get,set,t,eo) p =
 		| "default",_ -> AccNormal
 		| "set",pset ->
 			let set = "set_" ^ name in
-			if fctx.is_display_field && DisplayPosition.encloses_display_position pset then delay ctx PTypeField (fun () -> display_accessor set pset);
+			if fctx.is_display_field && DisplayPosition.display_position#enclosed_in pset then delay ctx PTypeField (fun () -> display_accessor set pset);
 			if not cctx.is_lib then delay_check (fun() -> check_method set t_set);
 			AccCall
 		| _,pset ->
@@ -1235,13 +1241,12 @@ let create_property (ctx,cctx,fctx) c f (get,set,t,eo) p =
 	) in
 	if (set = AccNormal && get = AccCall) || (set = AccNever && get = AccNever)  then error (name ^ ": Unsupported property combination") p;
 	let cf = {
-		(mk_field name ret f.cff_pos (pos f.cff_name)) with
+		(mk_field name ~public:(is_public (ctx,cctx) f.cff_access None) ret f.cff_pos (pos f.cff_name)) with
 		cf_doc = f.cff_doc;
 		cf_meta = f.cff_meta;
 		cf_kind = Var { v_read = get; v_write = set };
-		cf_public = is_public (ctx,cctx) f.cff_access None;
-		cf_extern = fctx.is_extern;
 	} in
+	if fctx.is_extern then add_class_field_flag cf CfExtern;
 	ctx.curfield <- cf;
 	bind_var (ctx,cctx,fctx) cf eo;
 	cf
@@ -1416,6 +1421,9 @@ let init_class ctx c p context_init herits fields =
 	(*
 		make sure a default contructor with same access as super one will be added to the class structure at some point.
 	*)
+	let has_struct_init = Meta.has Meta.StructInit c.cl_meta in
+	if has_struct_init then
+		ensure_struct_init_constructor ctx c fields p;
 	begin match cctx.uninitialized_final with
 		| Some pf when c.cl_constructor = None ->
 			display_error ctx "This class has uninitialized final vars, which requires a constructor" p;
@@ -1423,9 +1431,7 @@ let init_class ctx c p context_init herits fields =
 		| _ ->
 			()
 	end;
-	if Meta.has Meta.StructInit c.cl_meta then
-		ensure_struct_init_constructor ctx c fields p
-	else
+	if not has_struct_init then
 		(* add_constructor does not deal with overloads correctly *)
 		if not ctx.com.config.pf_overload then TypeloadFunction.add_constructor ctx c cctx.force_constructor p;
 	(* check overloaded constructors *)
